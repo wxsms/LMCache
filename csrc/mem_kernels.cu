@@ -73,8 +73,8 @@ __global__ void load_and_reshape_flash_kernel(
     cache_t tgt_value = value_cache[src_key_value_idx];
 
     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
-      key_cache[tgt_key_idx] = tgt_key;
-      value_cache[tgt_value_idx] = tgt_value;
+      key[tgt_key_idx] = tgt_key;
+      value[tgt_value_idx] = tgt_value;
     } else {
       // TODO: Need to convert data type back to fp8
       assert(false); 
@@ -106,13 +106,13 @@ __global__ void inplace_mem_move_kernel(
     const int head_idx = i / head_size;
     const int head_offset = i % head_size;
 
-    const int64_t src_slot_idx = src_slot_mapping[head_idx * num_tokens + head_offset];
-    const int64_t dst_slot_idx = dst_slot_mapping[head_idx * num_tokens + head_offset];
+    const int64_t src_slot_idx = src_slot_mapping[head_idx * num_tokens + token_idx];
+    const int64_t dst_slot_idx = dst_slot_mapping[head_idx * num_tokens + token_idx];
 
-    const int64_t src_block_idx = src_lot_idx / block_size;
+    const int64_t src_block_idx = src_slot_idx / block_size;
     const int64_t src_block_offset = src_slot_idx % block_size;
 
-    const int64_t dst_block_idx = dst_lot_idx / block_size;
+    const int64_t dst_block_idx = dst_slot_idx / block_size;
     const int64_t dst_block_offset = dst_slot_idx % block_size;
 
     const int x_idx = head_offset / x;
@@ -121,29 +121,29 @@ __global__ void inplace_mem_move_kernel(
     const int64_t src_key_idx =
         src_block_idx * num_heads * (head_size / x) * block_size * x +
         head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
-        block_offset * x + x_offset;
+        src_block_offset * x + x_offset;
     const int64_t src_value_idx =
         src_block_idx * num_heads * head_size * block_size +
         head_idx * head_size * block_size + head_offset * block_size +
-        block_offset;
+        src_block_offset;
 
     const int64_t tgt_key_idx =
         dst_block_idx * num_heads * (head_size / x) * block_size * x +
         head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
-        block_offset * x + x_offset;
+        dst_block_offset * x + x_offset;
     const int64_t tgt_value_idx =
         dst_block_idx * num_heads * head_size * block_size +
         head_idx * head_size * block_size + head_offset * block_size +
-        block_offset;
+        dst_block_offset;
     
-    scalar_t tgt_key = key[src_key_idx];
-    scalar_t tgt_value = value[src_value_idx];
+    cache_t tgt_key = key_cache[src_key_idx];
+    cache_t tgt_value = value_cache[src_value_idx];
     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
       key_cache[tgt_key_idx] = tgt_key;
       value_cache[tgt_value_idx] = tgt_value;
     } else {
       // TODO: Need to convert data type back to fp8
-      assert(false)
+      assert(false);
     }
   }
 }
@@ -231,9 +231,8 @@ void inplace_mem_move(
 
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size, 512));
-  const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   DISPATCH_BY_KV_CACHE_DTYPE(key_cache.dtype(), kv_cache_dtype,
-                             CALL_INPACE_MEM_MOVE);
+                             CALL_INPLACE_MEM_MOVE);
 }

@@ -54,3 +54,12 @@ std::tuple<torch::Tensor, torch::Tensor> load_and_reshape_flash(
     torch::Tensor& slot_mapping,
     const std::string& kv_cache_dtype,
     const double k_scale, const double v_scale);
+
+
+void inplace_mem_move(
+    torch::Tensor& key_cache,
+    torch::Tensor& value_cache,
+    torch::Tensor& src_slot_mapping,
+    torch::Tensor& dst_slot_mapping,
+    const std::string& kv_cache_dtype, const double k_scale,
+    const double v_scale);
