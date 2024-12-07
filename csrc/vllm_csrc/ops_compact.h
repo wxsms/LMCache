@@ -27,6 +27,14 @@ void rotary_embedding_k_fused(
     torch::Tensor& new_positions,
     torch::Tensor& key, int64_t head_size,
     torch::Tensor& cos_sin_cache, bool is_neox);
+
+void rotary_embedding_k_fused_paged(
+    torch::Tensor& old_positions,
+    torch::Tensor& new_positions,
+    torch::Tensor& key_cache, 
+    torch::Tensor& slot_mapping,
+    int64_t head_size,
+    torch::Tensor& cos_sin_cache, bool is_neox);
 // NOTE(Jiayi): ends
 
 void paged_attention_v1(

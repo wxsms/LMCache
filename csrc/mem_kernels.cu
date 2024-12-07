@@ -148,7 +148,6 @@ __global__ void inplace_mem_move_kernel(
   }
 }
 
-
 } // namespace lmc
 
 // KV_T is the stored data type of kv-cache.

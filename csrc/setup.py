@@ -12,7 +12,8 @@ for s in source_files:
         source_files_filtered.append(s)
 
 pos_encoding_files = ["vllm_csrc/pos_encoding_kernels_k.cu",
-                      "vllm_csrc/pos_encoding_kernels_k_fused.cu"]         
+                      "vllm_csrc/pos_encoding_kernels_k_fused.cu",
+                      "vllm_csrc/pos_encoding_kernels_k_fused_paged.cu"]         
 
 setup(
     name='lmc_ops',

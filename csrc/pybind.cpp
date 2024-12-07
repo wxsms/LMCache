@@ -27,5 +27,6 @@ PYBIND11_MODULE(lmc_ops, m) {
     m.def("rotary_embedding_k", &rotary_embedding_k);
     m.def("rotary_embedding_k_fused", &rotary_embedding_k_fused);
     m.def("inplace_mem_move", &inplace_mem_move);
+    m.def("rotary_embedding_k_fused_paged", &rotary_embedding_k_fused_paged);
     // m.def("paged_attention_v2", &paged_attention_v2);
 }
