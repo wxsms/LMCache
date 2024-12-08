@@ -13,7 +13,8 @@ for s in source_files:
 
 pos_encoding_files = ["vllm_csrc/pos_encoding_kernels_k.cu",
                       "vllm_csrc/pos_encoding_kernels_k_fused.cu",
-                      "vllm_csrc/pos_encoding_kernels_k_fused_paged.cu"]         
+                      "vllm_csrc/pos_encoding_kernels_k_fused_paged.cu",
+                      "vllm_csrc/pos_encoding_kernels_fused_paged_move.cu"]         
 
 setup(
     name='lmc_ops',
