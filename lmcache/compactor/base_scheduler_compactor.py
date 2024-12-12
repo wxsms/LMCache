@@ -74,8 +74,11 @@ class BaseSchedulerCompactor:
             # NOTE(Jiayi): we only use the first layer of the compacted indices
             # TODO(Jiayi): please check whether the dropped tokens are included
             # in the final output
+            
+            # FIXME(Jiayi): only use first layer and first head for now
             rep_layer_idx = 0
-            rep_compacted_indices = compacted_indices[rep_layer_idx]
+            rep_head_idx = 0
+            rep_compacted_indices = compacted_indices[rep_layer_idx][rep_head_idx]
             for i in rep_compacted_indices:
                 # TODO(Jiayi): compaction in prompt (prefill) is not supported now
                 if i < prompt_len:

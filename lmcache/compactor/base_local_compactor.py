@@ -12,6 +12,8 @@ from lmcache.logging import init_logger
 from lmcache_vllm.utils.positional_encoding import get_reverse_rope
 from lmcache_vllm.utils.rotary_embedding import get_rope
 
+import lmc_ops
+
 logger = init_logger(__name__)
 
 # FIXME(Jiayi): this LocalCompactor design need to be 
@@ -141,9 +143,9 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
     # FIXME(Jiayi): Extremely slow now
     # Improved a lot, requires futher optimization
     # 1. batching sequence (no kernels needed) (DONE)
-    # 2. batching head 
-    # 3. Let pos encoding be `inpace`, operating on paged memory directly
-    # 4. Let compaction be `inplace`
+    # 2. batching head (DONE)
+    # 3. Let pos encoding be `inpace`, operating on paged memory directly (DONE)
+    # 4. Let compaction be `inplace` (DONE)
     # 5. need to minimize transfer somehow (e.g., how to free a token in the middle
     # with only one block's free/allocate) -> is `block_size=1` the only way?
     def compact_memory(
@@ -171,8 +173,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         for seq_id, dst_slot_mapping in dst_slot_mappings.items():
             dst_slot_mapping = torch.tensor(dst_slot_mapping, 
                                             device=kv_caches[0][0].device)
+            dst_slot_mapping = dst_slot_mapping.unsqueeze(0).repeat(
+                        self.num_kv_heads, 1)
             dst_slot_mapping_batched.append(dst_slot_mapping)
-        dst_slot_mapping_batched = torch.cat(dst_slot_mapping_batched)
+        dst_slot_mapping_batched = torch.cat(dst_slot_mapping_batched, dim=1)
         
         for layer_idx in range(self.num_layers):
             
@@ -190,58 +194,31 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 new_positions = torch.tensor(self.positions_tracker[seq_id][1][layer_idx],
                                              device=kv_caches[0][0].device)
                 new_positions_batched.append(new_positions)
- 
-            src_slot_mapping_batched = torch.cat(src_slot_mapping_batched)
-            old_positions_batched = torch.cat(old_positions_batched)
-            new_positions_batched = torch.cat(new_positions_batched)
+            
+            
+            
+            src_slot_mapping_batched = torch.cat(src_slot_mapping_batched, dim=1)
+            old_positions_batched = torch.cat(old_positions_batched, dim=1)
+            new_positions_batched = torch.cat(new_positions_batched, dim=1)
+            
+            import pdb; pdb.set_trace()
             
             kv_cache = kv_caches[layer_idx]
             attn_layer = attn_layers[layer_idx]
             key_cache, value_cache = PagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
-        
-            # perm & reshape K
-            key_cache_temp = key_cache.permute(0,3,1,2,4)
-            
-            # TODO(Jiayi): tensor is copied here. Please avoid this
-            key_cache_temp = key_cache_temp.reshape(
-                            -1, self.num_kv_heads, self.head_size)
-            key_cache_temp = key_cache_temp[src_slot_mapping_batched]
-            
-            #import pdb
-            #pdb.set_trace()
-            # adjust pos encoding of k
-            self.adjust_positional_encoding(
-                old_positions_batched,
+
+            lmc_ops.rotary_embedding_fused_paged_move(
+                old_positions_batched, 
                 new_positions_batched,
-                key_cache_temp,
-            )
-            
-            # perm & reshape V
-            value_cache_temp = value_cache.permute(0,3,1,2)
-            value_cache_temp = value_cache_temp.reshape(
-                            -1, self.num_kv_heads, self.head_size)
-            value_cache_temp = value_cache_temp[src_slot_mapping_batched]
-            
-            
-            assert len(src_slot_mapping_batched) == len(dst_slot_mapping_batched)
-            misaligned_indices = torch.where(
-                src_slot_mapping_batched != dst_slot_mapping_batched)[0]
-            
-            if len(misaligned_indices) == 0:
-                continue
-            
-            # reshape_and_cache_flash is only used for flash attention
-            ops.reshape_and_cache(
-                key_cache_temp[misaligned_indices],
-                value_cache_temp[misaligned_indices],
-                key_cache,
+                key_cache, 
                 value_cache,
-                dst_slot_mapping_batched[misaligned_indices],
-                attn_layer.attn.kv_cache_dtype,
-                attn_layer.attn._k_scale,
-                attn_layer.attn._v_scale,
-            )
+                src_slot_mapping_batched,
+                dst_slot_mapping_batched,
+                self.head_size,
+                self.reverse_rotary_emb.rope.cos_sin_cache.to(key_cache.dtype), 
+                False) # TODO(Jiayi): make this False dynamic
+            
         
         # pop src_slot_mapping to reduce memory usage
         for seq_id in dst_slot_mappings.keys():
@@ -330,20 +307,20 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                     idx += 1
                     continue
                 
+                # TODO(Jiayi): compacted indices should be tensor
+                # Currently, it's a list of tensors
                 compacted_indices = self.compute_indices(seq_id, seq_len)
                 logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
                 logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
-                             f"-> {len(compacted_indices[0])}")
+                             f"-> {len(compacted_indices[0][0])}")
                 compacted_indices_dict[seq_id] = compacted_indices
 
-                # update src_slot_mappings
-                slot_mapping = []
-                compute_slot_mapping(False, slot_mapping, seq_id, seq_len, 
-                    0, 0, self.vllm_block_size, seq_group_metadata.block_tables)
                 
-                # FIXME(Jiayi): Please move this part inside the real compactor
                 if seq_id not in self.positions_tracker:
-                    old_positions = [[i for i in range(seq_len)] for j in range(len(compacted_indices))]
+                    layer_positions = torch.arange(0, seq_len, device=self.device)
+                    layer_positions = layer_positions.unsqueeze(0).repeat(
+                        self.num_kv_heads, 1)
+                    old_positions = [layer_positions] * self.num_layers
                 else:
                     old_positions = self.positions_tracker[seq_id][1]
                 
@@ -351,20 +328,32 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 new_positions = []
                 for layer_idx, compacted_indices_layer in enumerate(compacted_indices):
                     updated_old_positions.append(
-                        [old_positions[layer_idx][i] for i in compacted_indices_layer])
+                        torch.gather(old_positions[layer_idx],
+                                     dim=-1,
+                                     index=compacted_indices_layer))
                     
-                    new_positions.append(
-                        [i for i in range(len(compacted_indices_layer))])
+                    layer_new_positions = torch.arange(0, len(compacted_indices_layer[0]), device=self.device)
+                    layer_new_positions = layer_new_positions.unsqueeze(0).repeat(
+                        self.num_kv_heads, 1)
+                    new_positions.append(layer_new_positions)
                 
                 self.positions_tracker[seq_id] = (updated_old_positions, new_positions)
                 
                 
-                # FIXME(Jiayi): Please use tensor operations if possible
-                compacted_slot_mapping =[]
+                # update src_slot_mappings
+                slot_mapping = []
+                compute_slot_mapping(False, slot_mapping, seq_id, seq_len, 
+                    0, 0, self.vllm_block_size, seq_group_metadata.block_tables)
+                slot_mapping = torch.tensor(slot_mapping, device=self.device)
+                slot_mapping = slot_mapping.unsqueeze(0).repeat(
+                        self.num_kv_heads, 1)
                 
+                compacted_slot_mapping = []
                 for compacted_indices_layer in compacted_indices:
                     compacted_slot_mapping.append(
-                        [slot_mapping[i] for i in compacted_indices_layer])
+                        torch.gather(slot_mapping,
+                                     dim=-1,
+                                     index=compacted_indices_layer))
                 
                 self.src_slot_mappings[seq_id] = compacted_slot_mapping
                 idx += 1
@@ -376,6 +365,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         #torch.cuda.synchronize()
         #run_time = start_event.elapsed_time(end_event)
         #print(f"post model update time, {len(seq_group_metadata_list)} seqs: {run_time}")
+        
         
         return compactor_output
     

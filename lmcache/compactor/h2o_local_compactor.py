@@ -77,18 +77,26 @@ class H2OCompactor(BaseLocalCompactor):
         imp_score = self.imp_scores[seq_id]
         for layer_idx in range(self.num_layers):
             # sum of all heads
-            sum_scores_layer = torch.sum(imp_score[layer_idx], dim=0)
+            imp_score_gqa = imp_score[layer_idx].view(
+                -1, int(num_heads/num_kv_heads), imp_score[layer_idx].size(1))
+            sum_scores_layer = torch.sum(imp_score_gqa, dim=1)
+            
             imp_indices_layer = torch.topk(
-                sum_scores_layer, k=self.min_window_size).indices
+                imp_score[layer_idx], k=self.min_window_size).indices
             imp_indices_layer = torch.sort(imp_indices_layer).values
-            # TODO: please get rid of this `tolist`
-            imp_indices_layer = imp_indices_layer.tolist()
-            compacted_indices.append(imp_indices_layer)
-
+            
+            # TODO(Jiayi): check the following correctness
+            # TODO(Jiayi): need to repeat imp_indices_layer for all heads
             # compact imp_scores
             imp_score[layer_idx,: , :self.min_window_size] = \
-                imp_score[layer_idx, :, imp_indices_layer]
-            imp_score[layer_idx,: , self.min_window_size:] = 0
+                torch.gather(imp_score[layer_idx], 
+                             dim=-1,
+                             index=imp_indices_layer)
+            imp_score[layer_idx, : , self.min_window_size:] = 0
+            
+            # imp_indices_layer = imp_indices_layer.tolist()
+            compacted_indices.append(imp_indices_layer)
+
         #import pdb
         #pdb.set_trace()
         return compacted_indices

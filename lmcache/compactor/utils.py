@@ -25,7 +25,7 @@ class CompactorInput:
     # across all layers
     
     # {seq_idx: List[int]}
-    dst_slot_mappings: Dict[int, List[int]]
+    dst_slot_mappings: Dict[int, List[torch.Tensor]]
     end_seq_ids: List[int]
     
     def reset(self):
@@ -37,5 +37,5 @@ class CompactorInput:
 # number of compacted tokens back to scheduler
 @dataclass
 class CompactorOutput:
-    compacted_indices_dict: Dict[int, List[List[int]]]
+    compacted_indices_dict: Dict[int, List[torch.Tensor]]
 

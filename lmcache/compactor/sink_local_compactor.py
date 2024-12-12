@@ -72,7 +72,8 @@ class SinkCompactor(BaseLocalCompactor):
         sink_indices = [i for i in range(self.num_sink)]
         last_indices = [i for i in range(seq_len - num_last,
                                          seq_len)]
-        compacted_indices = [sink_indices + last_indices \
+        compacted_indices = [torch.tensor([sink_indices + last_indices] * self.num_kv_heads,
+                                          device=self.device)
             for i in range(self.num_layers)]
         
         return compacted_indices
