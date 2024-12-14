@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
+from dataclasses import dataclass
 import torch
 
 from vllm.core.interfaces import AllocStatus,
@@ -7,7 +8,10 @@ from vllm.sequence import Sequence, SequenceGroup
 
 @dataclass
 class GranularBlockTable:
-    # a 3-d tensor with shape [layer, head, num_tokens]
+    # 3-d tensor with shape [layer, head, num_blocks]
+    # Set compacted blocks to -1
+    # A caveat of this design is that the memory usage of the block table
+    # is not copacted
     physical_block_ids: torch.Tensor
     n_blocks: int
     
@@ -83,7 +87,6 @@ class GranularBlockManager:
         
         # TODO: need to optimize the following loop
         temp_idx = 0
-        stacked_physical_block_ids = [[[]*self.num_kv_heads] * self.num_layers]
         physical_block_ids.reshape
         granular_block_table = GranularBlockTable(
                                 physical_block_ids.reshape(self.num_layers, 
@@ -146,7 +149,24 @@ class GranularBlockManager:
         num_seqs = seq_group.num_seqs(status=SequenceStatus.RUNNING)
         return num_seqs * self.replica_constant <= self.num_free_blocks
     
+    def compact(
+        self, 
+        seq: Sequence, 
+        mask: torch.Tensor, # [num_layers, num_heads, num_blocks]
+    ):
+        granular_block_table = self.block_tables[seq.seq_id]
+        physical_block_ids = granular_block_table.physical_block_ids
+        self.physical_blocks_status[physical_block_ids.flatten()[mask]] = 1
+        physical_block_ids[mask] = -1
         
+        num_blocks_to_free = torch.sum(mask)
+        self.num_free_blocks += num_blocks_to_free
+        granular_block_table.n_blocks -= num_blocks_to_free
+        
+    
+    def batched_compact(self):
+        pass
+    
     def free(self, seq: Sequence):
         granular_block_table = self.block_tables[seq.seq_id]
         physical_block_ids = granular_block_table.physical_block_ids
@@ -155,11 +175,13 @@ class GranularBlockManager:
         mask = physical_block_ids.flatten() != -1
         self.physical_blocks_status[physical_block_ids.flatten()[mask]] = 0
         del self.block_tables[seq.seq_id]
+        
+        num_blocks_to_free = torch.sum(mask)
+        self.num_free_blocks += num_blocks_to_free
 
     
     def get_block_table(self, seq: Sequence) -> torch.Tensor:
         return self.block_tables[seq.seq_id].physical_block_ids
-    
     
     
     # DUMMY FUNCTIONS
