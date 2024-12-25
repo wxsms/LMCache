@@ -9,8 +9,8 @@ from vllm import _custom_ops as ops
 
 from lmcache.compactor.utils import CompactorOutput
 from lmcache.logging import init_logger
-from lmcache_vllm.utils.positional_encoding import get_reverse_rope
-from lmcache_vllm.utils.rotary_embedding import get_rope
+#from lmcache_vllm.utils.positional_encoding import get_reverse_rope
+#from lmcache_vllm.utils.rotary_embedding import get_rope
 
 import lmc_ops
 

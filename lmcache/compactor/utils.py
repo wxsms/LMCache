@@ -25,11 +25,11 @@ class CompactorInput:
     # across all layers
     
     # {seq_idx: List[int]}
-    dst_slot_mappings: Dict[int, List[torch.Tensor]]
+    dst_block_tables: Dict[int, List[List[torch.Tensor]]]
     end_seq_ids: List[int]
     
     def reset(self):
-        self.dst_slot_mappings = {}
+        self.dst_block_tables = {}
         self.end_seq_ids = []
 
 
@@ -39,3 +39,18 @@ class CompactorInput:
 class CompactorOutput:
     compacted_indices_dict: Dict[int, List[torch.Tensor]]
 
+
+def compute_n_tokens_layer_head(
+    compacted_indices: List[List[List[int]]]) -> torch.Tensor:
+    num_layers = len(compacted_indices)
+    num_heads = len(compacted_indices[0])
+    
+    # TODO (Jiayi): remove heardcoded device here
+    n_tokens_layer_head = torch.zeros(
+        (num_layers, num_heads),
+        dtype=torch.int32,
+        device="cuda")
+    for l, layer_indices in enumerate(compacted_indices):
+        for h, layer_head_indices in enumerate(layer_indices):
+        n_tokens_layer_head[l][h] = len(layer_head_indices)
+    return n_tokens_layer_head

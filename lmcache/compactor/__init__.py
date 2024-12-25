@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-
+from lmcache.compactor.core.block_manager import GranularBlockManager
 from lmcache.compactor.h2o_local_compactor import H2OCompactor
 from lmcache.compactor.sink_local_compactor import SinkCompactor
 from lmcache.compactor.base_local_compactor import BaseLocalCompactor
@@ -8,7 +8,8 @@ from lmcache.compactor.base_scheduler_compactor import BaseSchedulerCompactor
 
 __all__ = ["H2OCompactor", "SinkCompactor"
            "BaseSchedulerCompactor",
-           "CompactorInput", "CompactorOutput","CompactorMetadata"]
+           "CompactorInput", "CompactorOutput","CompactorMetadata",
+           "GranularBlockManager"]
 
 class LMCacheCompactorBuilder:
     _instances: Dict[str, BaseLocalCompactor] = {}
