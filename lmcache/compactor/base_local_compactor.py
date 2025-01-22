@@ -59,7 +59,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         # The following memory allocation may explode the memory if
         # `gpu_memory_utilization` is set too high in vllm
         # TODO: Also, please make it more flexible
-        max_num_tokens = 144400
+        max_num_tokens = 200000
         
         
         # The logits buffer need to be preallocated
@@ -126,9 +126,10 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 
                 # FIXME(Jiayi): this incurs memory overhead if the input is too long
                 # FIXME(Jiayi): this part requires fixing
-                buffer_size = max((seq_lens[idx]//self.max_window_size+1)*\
+                # Qizheng fix: increment buffer_size by 1 to avoid overflow
+                buffer_size = max((seq_lens[idx] // self.max_window_size + 1) * \
                     self.max_window_size,
-                    self.max_window_size)
+                    self.max_window_size) + 1
                 
                 imp_scores_temp = torch.zeros(
                     (self.num_layers, self.num_heads, buffer_size),
@@ -329,11 +330,19 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 if not self.decide_compact(seq_len):
                     idx += 1
                     continue
+
+                # Qizheng: update position tracker
+                if seq_id not in self.positions_tracker.keys():
+                    range_list = [i for i in range(seq_len)]
+                    self.positions_tracker[seq_id] = ([range_list] * self.num_layers, [])
+                else:
+                    range_list = [i for i in range(seq_len)]
+                    self.positions_tracker[seq_id][0][:] = [range_list] * self.num_layers
                 
                 compacted_indices = self.compute_indices(seq_id, seq_len)
-                logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
-                logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
-                             f"-> {len(compacted_indices[0])}")
+                # logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
+                # logger.debug(f"[Compactor] seq_len at layer 0: {seq_len}"
+                #              f"-> {len(compacted_indices[0])}")
                 compacted_indices_dict[seq_id] = compacted_indices
 
                 # update src_slot_mappings
@@ -345,7 +354,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 if seq_id not in self.positions_tracker:
                     old_positions = [[i for i in range(seq_len)] for j in range(len(compacted_indices))]
                 else:
-                    old_positions = self.positions_tracker[seq_id][1]
+                    # Qizheng fix: old_positions should be first entry in positions_tracker
+                    old_positions = self.positions_tracker[seq_id][0]
                 
                 updated_old_positions = []
                 new_positions = []
@@ -360,7 +370,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 
                 
                 # FIXME(Jiayi): Please use tensor operations if possible
-                compacted_slot_mapping =[]
+                compacted_slot_mapping = []
                 
                 for compacted_indices_layer in compacted_indices:
                     compacted_slot_mapping.append(
