@@ -20,8 +20,8 @@ class SinkCompactor(BaseLocalCompactor):
     def __init__(self, compactor_metadata):
         super().__init__(compactor_metadata)
         
-        self.min_window_size = 512
-        self.max_window_size = 1024
+        self.min_window_size = 256
+        self.max_window_size = 512
         self.num_sink = 4
         
         

@@ -59,7 +59,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         # The following memory allocation may explode the memory if
         # `gpu_memory_utilization` is set too high in vllm
         # TODO: Also, please make it more flexible
-        max_num_tokens = 200000
+        max_num_tokens = 100000
         
         
         # The logits buffer need to be preallocated
@@ -151,7 +151,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         self,
         model_input_subset,
         kv_caches,
-        dst_slot_mappings):
+        dst_slot_mappings,
+        preempt_seq_ids):
         """
         Make real memory movement here
         """
@@ -160,7 +161,12 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
         start_layer = model_input_subset.start_layer
         end_layer = model_input_subset.end_layer
         
-        
+        # Qizheng: throw away things in preempt_seq_ids
+        for preempt_seq_id in preempt_seq_ids:
+            # import pdb; pdb.set_trace()
+            self.src_slot_mappings.pop(preempt_seq_id, None)
+            self.positions_tracker.pop(preempt_seq_id, None)
+            self.imp_scores.pop(preempt_seq_id, None)
         
         if len(dst_slot_mappings) == 0:
             return
@@ -182,6 +188,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             new_positions_batched = []
             
             for seq_id, src_slot_mapping in self.src_slot_mappings.items():
+                if seq_id not in dst_slot_mappings:
+                    continue
                 src_slot_mapping = torch.tensor(src_slot_mapping[layer_idx],
                                                 device=kv_caches[0][0].device)
                 src_slot_mapping_batched.append(src_slot_mapping)
@@ -191,7 +199,7 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 new_positions = torch.tensor(self.positions_tracker[seq_id][1][layer_idx],
                                              device=kv_caches[0][0].device)
                 new_positions_batched.append(new_positions)
- 
+
             src_slot_mapping_batched = torch.cat(src_slot_mapping_batched)
             old_positions_batched = torch.cat(old_positions_batched)
             new_positions_batched = torch.cat(new_positions_batched)
@@ -223,7 +231,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             value_cache_temp = value_cache_temp.reshape(
                             -1, self.num_kv_heads, self.head_size)
             value_cache_temp = value_cache_temp[src_slot_mapping_batched]
-            
             
             assert len(src_slot_mapping_batched) == len(dst_slot_mapping_batched)
             misaligned_indices = torch.where(
@@ -317,6 +324,8 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
             request_id = seq_group_metadata.request_id
             seq_ids = model_input.request_ids_to_seq_ids[request_id]
             for seq_id in seq_ids:
+                # if 117 in seq_ids:
+                #     import pdb; pdb.set_trace()
                 if chunked_attetnion_weights is not None:
                     self.update_imp_scores(
                         seq_id,
@@ -326,11 +335,6 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 seq_len = seq_data.get_len()
                 
-                # Decide whether to perform compaction
-                if not self.decide_compact(seq_len):
-                    idx += 1
-                    continue
-
                 # Qizheng: update position tracker
                 if seq_id not in self.positions_tracker.keys():
                     range_list = [i for i in range(seq_len)]
@@ -338,6 +342,19 @@ class BaseLocalCompactor(metaclass=abc.ABCMeta):
                 else:
                     range_list = [i for i in range(seq_len)]
                     self.positions_tracker[seq_id][0][:] = [range_list] * self.num_layers
+
+                # Decide whether to perform compaction
+                if not self.decide_compact(seq_len):
+                    idx += 1
+                    continue
+
+                # # Qizheng: update position tracker
+                # if seq_id not in self.positions_tracker.keys():
+                #     range_list = [i for i in range(seq_len)]
+                #     self.positions_tracker[seq_id] = ([range_list] * self.num_layers, [])
+                # else:
+                #     range_list = [i for i in range(seq_len)]
+                #     self.positions_tracker[seq_id][0][:] = [range_list] * self.num_layers
                 
                 compacted_indices = self.compute_indices(seq_id, seq_len)
                 # logger.debug(f"[Compactor] local_compactor taking effect! seq_id: {seq_id}")
