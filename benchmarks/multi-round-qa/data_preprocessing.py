@@ -32,19 +32,27 @@ print(f"Number of IDs: {num_of_ids}")
 data = data[:int(num_of_ids * args.parse)]
 
 count = 0
+to_remove = []
 
 for d in data:
     d['num_round'] = len(
         d['conversations'])  # human is one round, gpt is another round
     human_tokens = []
     gpt_tokens = []
+    last = 0
     for conv in d['conversations']:
         if conv['from'] == 'human':
+            if last == 1:
+                to_remove.append(count) 
             human_tokens.append(estimate_num_tokens(conv['value']))
+            last = 1
         if conv['from'] == 'gpt':
+            if last == 2:
+                to_remove.append(count) 
             token_number = estimate_num_tokens(conv['value'])
             conv['num_tokens'] = token_number
             gpt_tokens.append(token_number)
+            last = 2
     if len(human_tokens) == 0:
         d['average_human_token'] = 0
         d['max_human_token'] = 0
@@ -62,7 +70,7 @@ for d in data:
     print(f"Finished {count}")
 
 # Remove the data that has two consecutive human rounds
-del data[260]
+data = [d for i, d in enumerate(data) if i not in to_remove]
 
 with open('ShareGPT.json', 'w', encoding='utf-8') as file:
     json.dump(data, file, ensure_ascii=False, indent=2)
