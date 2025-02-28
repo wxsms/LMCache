@@ -43,12 +43,12 @@ for d in data:
     for conv in d['conversations']:
         if conv['from'] == 'human':
             if last == 1:
-                to_remove.append(count) 
+                to_remove.append(count)
             human_tokens.append(estimate_num_tokens(conv['value']))
             last = 1
         if conv['from'] == 'gpt':
             if last == 2:
-                to_remove.append(count) 
+                to_remove.append(count)
             token_number = estimate_num_tokens(conv['value'])
             conv['num_tokens'] = token_number
             gpt_tokens.append(token_number)
@@ -70,6 +70,8 @@ for d in data:
     print(f"Finished {count}")
 
 # Remove the data that has two consecutive human rounds
+# or consecutive system rounds
+# Otherwise, they don't obey the chat template
 data = [d for i, d in enumerate(data) if i not in to_remove]
 
 with open('ShareGPT.json', 'w', encoding='utf-8') as file:
