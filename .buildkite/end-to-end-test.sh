@@ -9,7 +9,7 @@ uv pip install --upgrade vllm
 set -x
 
 orig_dir="$(pwd)"
-cd /home/shaotingf/lmcache-tests
+cd "$LM_CACHE_TEST_DIR"
 
 set +x
 
