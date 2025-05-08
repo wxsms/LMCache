@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# ← source the global minconda init
+. /etc/profile.d/miniconda.sh
+
 CONDA_ENV_NAME="buildkite-e2e"
 PYTHON_VERSION=3.10
 
@@ -20,9 +23,10 @@ conda activate ${CONDA_ENV_NAME}
 
 set -xe 
 
-pip install -r requirements.txt
-pip install -r requirements-test.txt
-pip install coverage
+python3 -m pip install uv
+uv pip install -r requirements.txt
+uv pip install -r requirements-test.txt
+uv pip install coverage
 
 set +x
 echo "Current env:"
