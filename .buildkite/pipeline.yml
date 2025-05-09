@@ -27,11 +27,11 @@ steps:
       - source .venv/bin/activate
       - |
         LMCACHE_TRACK_USAGE="false" \
-        uv run coverage run --source=lmcache/ -m pytest -xsv \
+        coverage run --source=lmcache/ -m pytest -xsv \
           --junitxml=junit/test-results.xml \
           --ignore=tests/disagg \
           --ignore=tests/experimental/test_pos_kernels.py
-      - uv run coverage report -m > coverage.txt
+      - coverage report -m > coverage.txt
     artifact_paths:
       - "junit/test-results.xml"
       - "coverage.txt"
