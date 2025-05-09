@@ -16,6 +16,8 @@ else
   uv venv "${VENV_DIR}"
 fi
 
+source buildkite/bin/activate
+
 # ─── CUDA paths ───────────────────────────────────────────────────────────────
 export CUDA_HOME="/usr/local/cuda-${CUDA_VERSION}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
