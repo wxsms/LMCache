@@ -1,47 +1,31 @@
-env:
-  PATH: "$HOME/.local/bin:$PATH"
+#!/usr/bin/env bash
+set -euo pipefail
 
-steps:
-  - label: ":pip: Prepare venv"
-    key: "venv"
-    plugins:
-      - cache#v3:
-          key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
-          paths:
-            - buildkite
-    command: |
-      bash .buildkite/install-env.sh
+python3 -m pip install --user uv
+export PATH="$HOME/.local/bin:$PATH"
 
-  - label: ":pytest: Run pytest"
-    key: "pytest"
-    depends_on: ["venv"]
-    timeout_in_minutes: 25
-    plugins:
-      - cache#v3:
-          # same key → restores the already‑built venv
-          key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
-          paths:
-            - buildkite
-    command: |
-      # activate the cached venv
-      source buildkite/bin/activate
+VENV_DIR="buildkite"        
+CUDA_VERSION=12.1           
 
-      # install & run your LMCache test harness
-      bash .buildkite/install-lmcache.sh
-      LMCACHE_TRACK_USAGE="false" \
-        coverage run --source=lmcache/ -m pytest -xsv \
-          --junitxml=junit/test-results.xml \
-          --ignore=tests/disagg \
-          --ignore=tests/experimental/test_pos_kernels.py
+if [[ -d "${VENV_DIR}" ]]; then
+  echo "Skipping venv creation: '${VENV_DIR}' already exists."
+else
+  uv venv "${VENV_DIR}"
+fi
 
-      coverage report -m > coverage.txt
+# Activate venv
+source "${VENV_DIR}/bin/activate"
 
-    artifact_paths:
-      - junit/test-results.xml
-      - coverage.txt
+# CUDA
+export CUDA_HOME="/usr/local/cuda-${CUDA_VERSION}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
 
-  - label: ":junit: Annotate"
-    depends_on: ["pytest"]
-    plugins:
-      - junit-annotate#v2.4.1:
-          artifacts: junit/*.xml
+set -x
+pip install -r requirements.txt
+pip install -r requirements-test.txt
+pip install coverage
+set +x
+
+echo "Current environment packages:"
+pip freeze
