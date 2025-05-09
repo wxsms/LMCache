@@ -1,10 +1,10 @@
 #!/bin/bash
 
-uv pip install -e .
-uv pip install matplotlib
-uv pip install pandas
-uv pip install vllm
-uv pip install --upgrade vllm
+pip install -e .
+pip install matplotlib
+pip install pandas
+pip install vllm
+pip install --upgrade vllm
 
 set -x
 
