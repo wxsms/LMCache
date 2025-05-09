@@ -7,21 +7,21 @@ steps:
     plugins:
       - cache#v1.5.2:
           key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
-          paths:
-            - buildkite/
-          pull: false
+          path: "buildkite"
+          save: "pipeline"
     command:
       - bash .buildkite/install-env.sh
 
   - label: ":pytest: Run pytest"
     key: "pytest"
-    depends_on: ["venv"]
+    depends_on:
+      - "venv"
     timeout_in_minutes: 25
     plugins:
       - cache#v1.5.2:
           key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
-          paths:
-            - buildkite/
+          path: "buildkite"
+          restore: "pipeline"
     command:
       - source buildkite/bin/activate
       - bash .buildkite/install-lmcache.sh
@@ -33,11 +33,12 @@ steps:
           --ignore=tests/experimental/test_pos_kernels.py
       - coverage report -m > coverage.txt
     artifact_paths:
-      - junit/test-results.xml
-      - coverage.txt
+      - "junit/test-results.xml"
+      - "coverage.txt"
 
   - label: ":junit: Annotate"
-    depends_on: ["pytest"]
+    depends_on:
+      - "pytest"
     plugins:
       - junit-annotate#v2.4.1:
           artifacts: "junit/*.xml"
