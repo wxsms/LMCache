@@ -26,7 +26,6 @@ fi
 
 # Activate the virtual environment
 source "$VENV_DIR/bin/activate"
-pwd
 
 # Confirm we’re on the right interpreter
 echo "→ python: $(which python)"
