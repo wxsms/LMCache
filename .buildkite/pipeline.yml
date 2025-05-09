@@ -5,21 +5,25 @@ steps:
   - label: ":pip: Prepare venv and prerequisites"
     key: "venv"
     command: |
-      pwd
-      ls -al
       bash .buildkite/install-env.sh
+    plugins:
+      - buildkite-plugins/workspace#v3.4.0:
+          propagate-environment: true
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
+    plugins:
+      - buildkite-plugins/workspace#v3.4.0:
+          propagate-environment: true
     command: |
-      pwd
-      ls -al
-      source .buildkite/buildkite/bin/activate
-      eval "$(conda shell.bash hook)"
+      source buildkite-e2e/bin/activate
       bash .buildkite/install-lmcache.sh
-      LMCACHE_TRACK_USAGE="false" coverage run --source=lmcache/ -m pytest -xsv --junitxml=junit/test-results.xml --ignore=tests/disagg --ignore=tests/experimental/test_pos_kernels.py
+      LMCACHE_TRACK_USAGE="false" coverage run --source=lmcache/ -m pytest -xsv \
+        --junitxml=junit/test-results.xml \
+        --ignore=tests/disagg \
+        --ignore=tests/experimental/test_pos_kernels.py
       coverage report -m > coverage.txt
     artifact_paths:
       - junit/test-results.xml
@@ -30,4 +34,3 @@ steps:
     plugins:
       - junit-annotate#v2.4.1:
           artifacts: junit/*.xml
-
