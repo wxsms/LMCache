@@ -4,13 +4,18 @@ env:
 steps:
   - label: ":pip: Prepare venv and prerequisites"
     key: "venv"
-    command: bash .buildkite/install-env.sh
+    command: |
+      pwd
+      ls -al
+      bash .buildkite/install-env.sh
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
     command: |
+      pwd
+      ls -al
       source .buildkite/buildkite/bin/activate
       eval "$(conda shell.bash hook)"
       bash .buildkite/install-lmcache.sh
