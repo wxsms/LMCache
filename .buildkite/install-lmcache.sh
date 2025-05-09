@@ -2,6 +2,8 @@
 
 set -xe 
 
+VENV_DIR=".venv"
+PYTHON_BIN="/usr/bin/python3.10"
 if [[ -d "$VENV_DIR" ]]; then
   echo "⟳ Using existing venv: $(pwd)/$VENV_DIR"
 else
