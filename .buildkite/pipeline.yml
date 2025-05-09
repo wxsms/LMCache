@@ -1,6 +1,5 @@
 env:
   PATH: "$HOME/.local/bin:$PATH"
-  BUILDKITE_PLUGIN_FS_CACHE_FOLDER: ""
 
 steps:
   - label: ":pip: Prepare venv"

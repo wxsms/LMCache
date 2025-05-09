@@ -1,10 +1,10 @@
 #!/bin/bash
 
-pip install -e .
-pip install matplotlib
-pip install pandas
-pip install vllm
-pip install --upgrade vllm
+uv pip install --no-project .
+uv pip install matplotlib
+uv pip install pandas
+uv pip install vllm
+uv pip install --upgrade vllm
 
 set -x
 
@@ -37,9 +37,9 @@ while [ $port2 -le $max_port ]; do
     fi
 done
 
-LMCACHE_TRACK_USAGE="false" python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
+LMCACHE_TRACK_USAGE="false" uv run python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
 
 set -x
 
-python3 outputs/drawing_wrapper.py ./
+uv run python3 outputs/drawing_wrapper.py ./
 mv outputs/*.{csv,pdf} "$orig_dir"/
