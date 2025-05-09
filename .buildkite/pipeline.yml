@@ -7,16 +7,16 @@ steps:
     command: |
       bash .buildkite/install-env.sh
     plugins:
-      - plugin: buildkite-plugins/workspace#v3.4.0
-        propagate-environment: true
+      - buildkite-plugins/workspace#v3.4.0:
+          propagate-environment: true
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
     plugins:
-      - plugin: buildkite-plugins/workspace#v3.4.0
-        propagate-environment: true
+      - buildkite-plugins/workspace#v3.4.0:
+          propagate-environment: true
     command: |
       source buildkite-e2e/bin/activate
       bash .buildkite/install-lmcache.sh
@@ -32,5 +32,5 @@ steps:
   - label: ":junit: Annotate"
     depends_on: ["pytest"]
     plugins:
-      - plugin: junit-annotate#v2.4.1
-        artifacts: junit/*.xml
+      - junit-annotate#v2.4.1:
+          artifacts: junit/*.xml
