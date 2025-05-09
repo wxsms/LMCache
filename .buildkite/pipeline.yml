@@ -2,18 +2,18 @@ env:
   PATH: "$HOME/.local/bin:$PATH"
 
 steps:
-  - label: ":pip: Prepare venv and prerequisites"
+  - label: ":pip: Prepare venv"
     key: "venv"
     command: |
       bash .buildkite/install-env.sh
-      buildkite-agent artifact upload "buildkite/**"
+      buildkite-agent artifact upload "buildkite"
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
     command: |
-      buildkite-agent artifact download "buildkite/**" .
+      buildkite-agent artifact download "buildkite" .
       source buildkite/bin/activate
       bash .buildkite/install-lmcache.sh
       LMCACHE_TRACK_USAGE="false" \
