@@ -1,6 +1,6 @@
 #!/bin/bash
 
-uv pip install --no-project .
+uv pip install -e .
 uv pip install matplotlib
 uv pip install pandas
 uv pip install vllm
@@ -37,9 +37,9 @@ while [ $port2 -le $max_port ]; do
     fi
 done
 
-LMCACHE_TRACK_USAGE="false" uv run python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
+LMCACHE_TRACK_USAGE="false" uv run --no-project python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
 
 set -x
 
-uv run python3 outputs/drawing_wrapper.py ./
+uv run --no-project python3 outputs/drawing_wrapper.py ./
 mv outputs/*.{csv,pdf} "$orig_dir"/

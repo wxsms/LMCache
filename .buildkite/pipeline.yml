@@ -26,11 +26,11 @@ steps:
       - bash .buildkite/install-lmcache.sh
       - |
         LMCACHE_TRACK_USAGE="false" \
-        uv run coverage run --source=lmcache/ -m pytest -xsv \
+        uv run --no-project coverage run --source=lmcache/ -m pytest -xsv \
           --junitxml=junit/test-results.xml \
           --ignore=tests/disagg \
           --ignore=tests/experimental/test_pos_kernels.py
-      - uv run coverage report -m > coverage.txt
+      - uv run --no-project coverage report -m > coverage.txt
     artifact_paths:
       - "junit/test-results.xml"
       - "coverage.txt"
