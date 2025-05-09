@@ -6,11 +6,12 @@ steps:
     key: "venv"
     plugins:
       - cache#v1.5.2:
+          # must include both a key _and_ a paths: block
           key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
           paths:
-            - buildkite
-    command: |
-      bash .buildkite/install-env.sh
+            - buildkite/
+    command:
+      - bash .buildkite/install-env.sh
 
   - label: ":pytest: Run pytest"
     key: "pytest"
@@ -20,16 +21,17 @@ steps:
       - cache#v1.5.2:
           key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
           paths:
-            - buildkite
-    command: |
-      source buildkite/bin/activate
-      bash .buildkite/install-lmcache.sh
-      LMCACHE_TRACK_USAGE="false" \
+            - buildkite/
+    command:
+      - source buildkite/bin/activate
+      - bash .buildkite/install-lmcache.sh
+      - |
+        LMCACHE_TRACK_USAGE="false" \
         coverage run --source=lmcache/ -m pytest -xsv \
           --junitxml=junit/test-results.xml \
           --ignore=tests/disagg \
           --ignore=tests/experimental/test_pos_kernels.py
-      coverage report -m > coverage.txt
+      - coverage report -m > coverage.txt
     artifact_paths:
       - junit/test-results.xml
       - coverage.txt
@@ -38,4 +40,4 @@ steps:
     depends_on: ["pytest"]
     plugins:
       - junit-annotate#v2.4.1:
-          artifacts: junit/*.xml
+          artifacts: "junit/*.xml"
