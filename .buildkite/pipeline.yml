@@ -7,16 +7,16 @@ steps:
     command: |
       bash .buildkite/install-env.sh
     plugins:
-      - buildkite-plugins/workspace#v3.4.0:
-          propagate-environment: true
+      - plugin: buildkite-plugins/workspace#v3.4.0
+        propagate-environment: true
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
     plugins:
-      - buildkite-plugins/workspace#v3.4.0:
-          propagate-environment: true
+      - plugin: buildkite-plugins/workspace#v3.4.0
+        propagate-environment: true
     command: |
       source buildkite-e2e/bin/activate
       bash .buildkite/install-lmcache.sh
