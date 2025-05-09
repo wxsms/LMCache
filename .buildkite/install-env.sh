@@ -2,8 +2,7 @@
 
 set -euo pipefail
 
-# Name of the virtual‑env directory (relative to the repo root)
-VENV_DIR="buildkite"
+VENV_DIR=".venv"
 
 # Python interpreter to use
 PYTHON_BIN="/usr/bin/python3.10"
