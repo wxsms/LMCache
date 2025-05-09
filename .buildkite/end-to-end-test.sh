@@ -51,9 +51,9 @@ while [ $port2 -le $max_port ]; do
     fi
 done
 
-LMCACHE_TRACK_USAGE="false" uv run python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
-
 set -x
 
-uv run python3 outputs/drawing_wrapper.py ./
+source .venv/bin/activate
+LMCACHE_TRACK_USAGE="false" python3 main.py tests/tests.py -f test_local -o outputs/ -p $port1 $port2
+python3 outputs/drawing_wrapper.py ./
 mv outputs/*.{csv,pdf} "$orig_dir"/
