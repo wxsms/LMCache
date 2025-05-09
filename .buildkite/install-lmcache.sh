@@ -12,7 +12,7 @@ else
   uv venv --python "$PYTHON_BIN" "$VENV_DIR"
 fi
 
-uv pip install -e . --no-build-isolation
+uv pip install -e .
 
 # List installed packages for debugging
 echo "📦 Installed packages in venv:"
