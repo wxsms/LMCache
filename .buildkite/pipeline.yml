@@ -6,18 +6,14 @@ steps:
     key: "venv"
     command: |
       bash .buildkite/install-env.sh
-    plugins:
-      - buildkite-plugins/workspace#v3.4.0:
-          propagate-environment: true
+      buildkite-agent workspace save
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
-    plugins:
-      - buildkite-plugins/workspace#v3.4.0:
-          propagate-environment: true
     command: |
+      buildkite-agent workspace restore
       source buildkite-e2e/bin/activate
       bash .buildkite/install-lmcache.sh
       LMCACHE_TRACK_USAGE="false" coverage run --source=lmcache/ -m pytest -xsv \
