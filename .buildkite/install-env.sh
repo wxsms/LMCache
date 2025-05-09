@@ -2,10 +2,6 @@
 
 set -euo pipefail
 
-echo "PATH=$PATH"
-which uv || (echo "uv still not found!" && exit 1)
-uv --version
-
 VENV_DIR=".venv"
 
 # Python interpreter to use
