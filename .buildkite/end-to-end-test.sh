@@ -1,10 +1,22 @@
 #!/bin/bash
 
+if [[ -d "$VENV_DIR" ]]; then
+  echo "⟳ Using existing venv: $(pwd)/$VENV_DIR"
+else
+  echo "⚙️  Creating venv with Python 3.10 at: $(pwd)/$VENV_DIR"
+  # use uv for fast venv creation
+  uv venv --python "$PYTHON_BIN" "$VENV_DIR"
+fi
+
 uv pip install -e .
 uv pip install matplotlib
 uv pip install pandas
 uv pip install vllm
 uv pip install --upgrade vllm
+
+# List installed packages for debugging
+echo "📦 Installed packages in venv:"
+uv pip freeze
 
 set -x
 
