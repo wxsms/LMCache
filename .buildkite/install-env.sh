@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ─── Ensure uv is available ───────────────────────────────────────────────────
+python3 -m pip install --user uv
+export PATH="$HOME/.local/bin:$PATH"
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 VENV_DIR="buildkite"        
 CUDA_VERSION=12.1           

@@ -1,3 +1,6 @@
+env:
+  PATH: "$HOME/.local/bin:$PATH"
+
 steps:
   - label: ":pip: Prepare venv and prerequisites"
     key: "venv"
