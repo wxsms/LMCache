@@ -6,10 +6,10 @@ steps:
     key: "venv"
     plugins:
       - cache#v1.5.2:
-          # must include both a key _and_ a paths: block
           key: "venv-{{ checksum \"requirements.txt\" }}-{{ checksum \"requirements-test.txt\" }}"
           paths:
             - buildkite/
+          pull: false
     command:
       - bash .buildkite/install-env.sh
 
