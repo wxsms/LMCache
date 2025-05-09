@@ -1,33 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# ← source the global minconda init
-. /etc/profile.d/miniconda.sh
+# ─── Configuration ────────────────────────────────────────────────────────────
+VENV_DIR="buildkite-e2e"
+CUDA_VERSION=12.1
 
-CONDA_ENV_NAME="buildkite-e2e"
-PYTHON_VERSION=3.10
-
-exist_env="$(conda env list | grep ${CONDA_ENV_NAME})"
-if [[ -n $exist_env ]]; then
-    echo "Skipping env creation"
+# ─── Create venv if not exists ────────────────────────────────────────────────
+if [[ -d "${VENV_DIR}" ]]; then
+    echo "Skipping venv creation: '${VENV_DIR}' already exists."
 else
-    conda create -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} -y
+    uv venv "${VENV_DIR}"
 fi
 
-cuda_version=12.1
-export CUDA_HOME=/usr/local/cuda-${cuda_version}
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-export PATH=$CUDA_HOME/bin:$PATH
+# ─── CUDA Environment Variables ───────────────────────────────────────────────
+export CUDA_HOME="/usr/local/cuda-${CUDA_VERSION}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
 
-eval "$(conda shell.bash hook)"
-conda activate ${CONDA_ENV_NAME}
+# ─── Install packages using uv pip ────────────────────────────────────────────
+set -xe
 
-set -xe 
-
-python3 -m pip install uv
 uv pip install -r requirements.txt
 uv pip install -r requirements-test.txt
 uv pip install coverage
 
 set +x
-echo "Current env:"
-pip freeze 
+echo "Current environment packages:"
+"${VENV_DIR}/bin/pip" freeze
