@@ -6,20 +6,21 @@ steps:
     key: "venv"
     command: |
       bash .buildkite/install-env.sh
-      buildkite-agent workspace save
+      buildkite-agent artifact upload "buildkite/**"
 
   - label: ":pytest: Run pytest"
     key: "pytest"
     depends_on: ["venv"]
     timeout_in_minutes: 25
     command: |
-      buildkite-agent workspace restore
-      source buildkite-e2e/bin/activate
+      buildkite-agent artifact download "buildkite/**" .
+      source buildkite/bin/activate
       bash .buildkite/install-lmcache.sh
-      LMCACHE_TRACK_USAGE="false" coverage run --source=lmcache/ -m pytest -xsv \
-        --junitxml=junit/test-results.xml \
-        --ignore=tests/disagg \
-        --ignore=tests/experimental/test_pos_kernels.py
+      LMCACHE_TRACK_USAGE="false" \
+        coverage run --source=lmcache/ -m pytest -xsv \
+          --junitxml=junit/test-results.xml \
+          --ignore=tests/disagg \
+          --ignore=tests/experimental/test_pos_kernels.py
       coverage report -m > coverage.txt
     artifact_paths:
       - junit/test-results.xml
