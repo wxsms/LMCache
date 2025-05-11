@@ -10,10 +10,10 @@ else
   uv venv --python "$PYTHON_BIN" "$VENV_DIR"
 fi
 
-uv pip install -e .
 uv pip install matplotlib
 uv pip install pandas
 uv pip install --upgrade vllm
+uv pip install -e .
 
 # List installed packages for debugging
 echo "📦 Installed packages in venv:"
