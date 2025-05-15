@@ -167,11 +167,15 @@ class RequestTracker:
                 local cache hit) and new tokens that will be scheduled.
 
         """
+        unfolded_block_ids = []
+        for ids in new_request.block_ids:
+            unfolded_block_ids.extend(ids)
+
         return RequestTracker(
             req_id=new_request.req_id,
             token_ids=new_request.prompt_token_ids[:num_tokens_to_compute].
             copy(),
-            allocated_block_ids=new_request.block_ids.copy(),
+            allocated_block_ids=unfolded_block_ids,
             num_saved_tokens=0,
         )
 
