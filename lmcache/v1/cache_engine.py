@@ -474,6 +474,7 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         token_database: TokenDatabase,
         layerwise_gpu_connector: GPUConnectorInterface,
         layerwise: bool = True,
+        enable_blend: bool = False,
     ):
         super().__init__(
             config,
@@ -483,10 +484,32 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             layerwise_gpu_connector,
             layerwise,
         )
+        
+        # FIXME(Jiayi): fix this assert
         assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
 
         self.num_layers = metadata.kv_shape[0]
+        
+        if enable_blend:
+            # FIXME(Jiayi): Fix this model initialization
+            # need to find a way to get the model pointer
+            self.layerwise_model = 
 
+    @_lmcache_nvtx_annotate
+    @torch.inference_mode()
+    def compute_layer(
+        self, 
+        tokens: torch.Tensor
+        **kwargs,
+    ):
+        """
+        """
+        # layerwise_model_executor = self.layerwise_model.xxxx
+        # for i in range(num_layers):
+        # compute
+        # yield
+        
+    
     @_lmcache_nvtx_annotate
     @torch.inference_mode()
     def store_layer(

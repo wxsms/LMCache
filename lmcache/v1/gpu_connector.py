@@ -457,6 +457,233 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
         return torch.Size([2, self.num_layers, num_tokens, self.hidden_dim_size])
 
 
+class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
+    """ """
+
+    def __init__(
+        self,
+        hidden_dim_size: int,
+        num_layers: int,
+        use_gpu: bool = False,
+        **kwargs,
+    ):
+        """ """
+        self.hidden_dim_size = hidden_dim_size
+        self.num_layers = num_layers
+
+        if use_gpu:
+            assert "dtype" in kwargs, "dtype should be provided to create a GPU buffer."
+            assert "device" in kwargs, (
+                "device should be provided to create a GPU buffer."
+            )
+
+            # FIXME (Jiayi): Please remove this hardcode
+            max_tokens = 32000
+            shape = self.get_shape(max_tokens)
+            self.dtype = kwargs["dtype"]
+            self.device = kwargs["device"]
+
+            num_elements = shape.numel()
+
+            # All sizes are in bytes
+            element_size = torch.tensor([], dtype=self.dtype).element_size()
+            # We need to `2 *` here because we need two buffers:
+            # one for storing/loading and the other for compute
+            gpu_buffer_size = 2 * num_elements * element_size
+            self.gpu_buffer_allocator = GPUMemoryAllocator(
+                gpu_buffer_size, device=self.device
+            )
+
+            self.load_stream = torch.cuda.Stream()
+            self.store_stream = torch.cuda.Stream()
+            
+            # FIXME (Jiayi): (req_id, layer_id): buffer
+            self.buffer_mapping = {}
+            
+        else:
+            # TODO(Jiayi): Support `use_gpu=False` case
+            pass
+
+    def to_gpu(self, memory_obj: MemoryObj, start: int, end: int, **kwargs):
+        """ """
+
+        raise NotImplementedError
+
+    def from_gpu(self, memory_obj: MemoryObj, start: int, end: int, **kwargs):
+        """ """
+
+        raise NotImplementedError
+
+    @_lmcache_nvtx_annotate
+    def batched_to_gpu(self, starts: List[int], ends: List[int], **kwargs):
+        """
+        This function is a generator that moves the KV cache from the memory
+        objects to buffer GPU memory. The first iteration will prepare some
+        related metadata. In each of the following iterations, it will first
+        wait until the loading of the previous layer finish, and then load
+        one layer of KV cache from the memory objects -> GPU buffer.
+        The last iteration simply waits for the last layer
+        to finish.
+        In total, this the generator will yield num_layers + 2 times.
+
+        :param starts: The starting indices of the KV cache in the corresponding
+            token sequence.
+
+        :param ends: The ending indices of the KV cache in the corresponding
+            token sequence.
+
+        """
+
+        kvcaches: List[torch.Tensor] = kwargs["kvcaches"]
+        slot_mapping: torch.Tensor = kwargs["slot_mapping"]
+
+        slot_mapping_chunks = []
+        for start, end in zip(starts, ends, strict=False):
+            slot_mapping_chunks.append(slot_mapping[start:end])
+
+        slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
+
+        num_tokens = len(slot_mapping_full)
+        buffer_shape = self.get_shape(num_tokens)
+        tmp_gpu_buffer_obj = self.gpu_buffer_allocator.allocate(
+            buffer_shape, self.dtype, MemoryFormat.KV_T2D
+        )
+        assert tmp_gpu_buffer_obj is not None, (
+            "Failed to allocate GPU buffer in GPUConnector"
+        )
+        assert tmp_gpu_buffer_obj.tensor is not None
+
+        offset = starts[0]
+        current_stream = torch.cuda.current_stream()
+
+        for layer_id in range(self.num_layers):
+            memory_objs_layer = yield
+            current_stream.wait_stream(self.load_stream)
+            if layer_id > 0:
+                logger.debug(f"Finished loading layer {layer_id - 1}")
+
+            # memobj -> gpu_buffer -> kvcaches
+            with torch.cuda.stream(self.load_stream):
+                for start, end, memory_obj in zip(
+                    starts, ends, memory_objs_layer, strict=False
+                ):
+                    assert memory_obj.metadata.fmt == MemoryFormat.KV_T2D
+                    tmp_gpu_buffer_obj.tensor[start - offset : end - offset].copy_(
+                        memory_obj.tensor, non_blocking=True
+                    )
+
+                lmc_ops.single_layer_kv_transfer(
+                    tmp_gpu_buffer_obj.tensor,
+                    kvcaches[layer_id][0],
+                    kvcaches[layer_id][1],
+                    slot_mapping_full,
+                    False,
+                )
+        yield
+
+        # synchronize the last layer
+        current_stream.wait_stream(self.load_stream)
+
+        # free the buffer memory
+        tmp_gpu_buffer_obj.ref_count_down()
+
+        logger.debug(f"Finished loading layer {layer_id}")
+        yield
+
+    @_lmcache_nvtx_annotate
+    def batched_from_gpu(
+        self,
+        memory_objs: List[List[MemoryObj]],
+        starts: List[int],
+        ends: List[int],
+        **kwargs,
+    ):
+        """
+        This function is a generator that moves the KV cache from the paged GPU
+        memory to the memory objects. The first iteration will prepare some
+        related metadata and initiate the transfer in the first layer. In each
+        of the following iterations, it will first wait until the storing of
+        previous layer finishes, and then initiate string the KV cache of the
+        current layer one. The storing process of the KV cache is paged GPU
+        memory -> GPU buffer -> memory objects. The last iteration simply waits
+        for the last layer to finish.
+        In total, this the generator will yield num_layers + 1 times.
+
+        :param memory_objs: The memory objects to store the KV cache. The first
+            dimension is the number of layers, and the second dimension is the
+            number of memory objects (i.e., number of chunks) for each layer.
+
+        :param starts: The starting indices of the KV cache in the corresponding
+            token sequence.
+
+        :param ends: The ending indices of the KV cache in the corresponding
+            token sequence.
+
+        :raises ValueError: If 'kvcaches' is not provided in kwargs.
+
+        :raises ValueError: If 'slot_mapping' is not provided in kwargs.
+        """
+
+        if "kvcaches" not in kwargs:
+            raise ValueError("'kvcaches' should be provided in kwargs.")
+
+        if "slot_mapping" not in kwargs:
+            raise ValueError("'slot_mapping' should be provided in kwargs.")
+
+        kvcaches: List[torch.Tensor] = kwargs["kvcaches"]
+        slot_mapping: torch.Tensor = kwargs["slot_mapping"]
+
+        slot_mapping_chunks = []
+        for start, end in zip(starts, ends, strict=False):
+            slot_mapping_chunks.append(slot_mapping[start:end])
+
+        slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
+
+        num_tokens = len(slot_mapping_full)
+        buffer_shape = self.get_shape(num_tokens)
+        tmp_gpu_buffer_obj = self.gpu_buffer_allocator.allocate(
+            buffer_shape, self.dtype, MemoryFormat.KV_T2D
+        )
+        assert tmp_gpu_buffer_obj is not None, (
+            "Failed to allocate GPU buffer in GPUConnector"
+        )
+        assert tmp_gpu_buffer_obj.tensor is not None
+
+        offset = starts[0]
+        current_stream = torch.cuda.current_stream()
+
+        for layer_id in range(self.num_layers):
+            memory_objs_layer = memory_objs[layer_id]
+            # kvcaches -> gpu_buffer -> memobj
+            with torch.cuda.stream(self.store_stream):
+                self.store_stream.wait_stream(current_stream)
+                lmc_ops.single_layer_kv_transfer(
+                    tmp_gpu_buffer_obj.tensor,
+                    kvcaches[layer_id][0],
+                    kvcaches[layer_id][1],
+                    slot_mapping_full,
+                    True,
+                )
+                for start, end, memory_obj in zip(
+                    starts, ends, memory_objs_layer, strict=False
+                ):
+                    assert memory_obj.tensor is not None
+                    memory_obj.tensor.copy_(
+                        tmp_gpu_buffer_obj.tensor[start - offset : end - offset],
+                        non_blocking=True,
+                    )
+
+            yield
+            self.store_stream.synchronize()
+            logger.debug(f"Finished offloading layer {layer_id}")
+
+        # free the buffer memory
+        tmp_gpu_buffer_obj.ref_count_down()
+        yield
+
+    def get_shape(self, num_tokens: int) -> torch.Size:
+        return torch.Size([num_tokens, 2, self.hidden_dim_size])
+
 class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
     """ """
 
@@ -689,6 +916,7 @@ class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
 
     def get_shape(self, num_tokens: int) -> torch.Size:
         return torch.Size([num_tokens, 2, self.hidden_dim_size])
+
 
 
 class VLLMPagedMemGPUConnectorMLA(GPUConnectorInterface):
