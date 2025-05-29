@@ -12,24 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-# Standard
 import abc
+from typing 
+from dataclasses import dataclass
 
 import torch
 
+class LMCAttnMetadata(metaclass=abc.ABCMeta):
+    pass
 
-class AttentionInterface(metaclass=abc.ABCMeta):
-    
-    @abc.abstractmethod
-    def forward_contiguous(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        **kwargs
-    ):
-        """
-        Perform forward pass of the attention mechanism.
-        """
-        raise NotImplementedError
+@dataclass
+class LMCFlashAttnMetadata(LMCAttnMetadata):
+    query_start_loc: torch.Tensor
+    seq_lens: torch.Tensor
+    max_query_len: torch.Tensor
+    max_seq_len: torch.Tensor
+    scheduler_metadata: Optional[torch.Tensor] = None
