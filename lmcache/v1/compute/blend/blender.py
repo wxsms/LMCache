@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from lmcache.v1.compute.blend.metadata import LMCBlendMetadata, LMCBlendCommonMetadata
+from lmcache.v1.compute.models.utils import infer_model_from_vllm
 
 class LMCBlender:
     """
@@ -20,11 +21,17 @@ class LMCBlender:
     This backend uses the Blender implementation for efficient blending computation.
     """
 
-    def __init__(self, cache_engine, gpu_connector):
+    def __init__(
+        self, 
+        cache_engine, 
+        gpu_connector,
+        vllm_model,
+    ):
         self.cache_engine = cache_engine
         self.gpu_connector = gpu_connector
         
-        self.layerwise_model = 
+        self.layerwise_model = infer_model_from_vllm(vllm_model)
+        self.num_layers = 
         
         self.common_metadata = LMCBlendCommonMetadata(
             check_layers=[1],
@@ -65,8 +72,28 @@ class LMCBlender:
         return old_k, old_v
 
 
-    def blend_layer(self, input_ids):
-        layerwise_model_executor = self.layerwise_model.compute_layer(input_ids)
-        yield from layerwise_model_executor
+    def blend_layer(
+        self, 
+        tokens: torch.Tensor, 
+        mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
+        
+        # FIXME: including loading and storing here
+        
+        layerwise_model_executor = self.layerwise_model.compute_layer(tokens)
+        layerwise_retriever = self.cache_engine.retrieve_layer(
+            tokens, mask, **kwargs)
+        
+        next(layerwise_retriever)
+        yield
+        
+        for i range(self.num_layers):
+            next(layerwise_retriever)
+            next(layerwise_model_executor)
+            yield
+        
+        self.metadata.clean()
+        yield
         
         

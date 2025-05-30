@@ -495,20 +495,6 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             # need to find a way to get the model pointer
             self.layerwise_model = 
 
-    @_lmcache_nvtx_annotate
-    @torch.inference_mode()
-    def compute_layer(
-        self, 
-        tokens: torch.Tensor
-        **kwargs,
-    ):
-        """
-        """
-        # layerwise_model_executor = self.layerwise_model.xxxx
-        # for i in range(num_layers):
-        # compute
-        # yield
-        
     
     @_lmcache_nvtx_annotate
     @torch.inference_mode()
@@ -629,6 +615,8 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Generator[Optional[torch.Tensor], None, None]:
+        
+        # FIXME: fix the comment here
         """
         Retrieve the KV cache in a layerwise manner.
 
