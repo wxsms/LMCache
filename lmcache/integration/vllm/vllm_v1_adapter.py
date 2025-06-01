@@ -32,10 +32,11 @@ import vllm.envs as envs
 import zmq
 
 # First Party
-from lmcache.integration.vllm.utils import lmcache_get_config
+from lmcache.integration.vllm.utils import ENGINE_NAME, lmcache_get_config
 from lmcache.integration.vllm.vllm_adapter import init_lmcache_engine
 from lmcache.logging import init_logger
 from lmcache.v1.cache_engine import LayerwiseLMCacheEngine, LMCacheEngine
+from lmcache.v1.compute.blend.utils import LMCacheBlenderBuilder
 
 if TYPE_CHECKING:
     # Third Party
@@ -377,6 +378,13 @@ class LMCacheConnectorV1Impl:
             
             self.use_layerwise = config.use_layerwise
             self.enable_blending = config.enable_blending
+            
+            if self.enable_blending:
+                self.blender = LMCacheBlenderBuilder.get_or_create(
+                    ENGINE_NAME,
+                    self.lmcache_engine,
+                    self.lmcache_engine.gpu_connector,
+                )
 
             # NOTE: Only create the KV lookup API server on worker rank 0
             # when there are multiple workers
@@ -487,16 +495,27 @@ class LMCacheConnectorV1Impl:
 
             if self.use_layerwise:
                 assert isinstance(self.lmcache_engine, LayerwiseLMCacheEngine)
-                layerwise_retriever = self.lmcache_engine.retrieve_layer(
-                    tokens,
-                    token_mask,
-                    kvcaches=kvcaches,
-                    slot_mapping=slot_mapping,
-                )
-                # NOTE: retrieve for two layers at the first layer
-                next(layerwise_retriever)
-                next(layerwise_retriever)
-                self.layerwise_retrievers.append(layerwise_retriever)
+                
+                # NOTE(Jiayi): Perform blending before layerwise prefix caching
+                if self.enable_blending:
+                    self.blender.blend(
+                        tokens,
+                        token_mask,
+                        kvcaches=kvcaches,
+                        slot_mapping=slot_mapping,
+                    )
+                else:
+                    # TODO(Jiayi): Need to make prefix caching and blending compatible
+                    layerwise_retriever = self.lmcache_engine.retrieve_layer(
+                        tokens,
+                        token_mask,
+                        kvcaches=kvcaches,
+                        slot_mapping=slot_mapping,
+                    )
+                    # NOTE: retrieve for two layers at the first layer
+                    next(layerwise_retriever)
+                    next(layerwise_retriever)
+                    self.layerwise_retrievers.append(layerwise_retriever)
             else:
                 ret_token_mask = self.lmcache_engine.retrieve(
                     tokens,

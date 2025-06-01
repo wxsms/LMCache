@@ -467,9 +467,15 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         use_gpu: bool = False,
         **kwargs,
     ):
-        """ """
+        """ 
+        """
         self.hidden_dim_size = hidden_dim_size
         self.num_layers = num_layers
+        
+        # TODO(Jiayi): remove this hardcode
+        self.cache_positions = True
+        
+        # FIXME: get rope
 
         if use_gpu:
             assert "dtype" in kwargs, "dtype should be provided to create a GPU buffer."
@@ -580,7 +586,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
 
         for layer_id in range(self.num_layers+2):
             
-            # FIXME: change log
+            # FIXME: should we yield in the following two conditional blocks?
             if layer_id > 0 and layer_id <= self.num_layers:
                 
                 # ping-pong the buffers
@@ -588,16 +594,18 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                     load_gpu_buffer_obj, compute_gpu_buffer_obj
                 self.buffer_mapping[layer_id-1] = compute_gpu_buffer_obj
                 
+                # FIXME: recover pos encoding
+                
                 logger.debug(f"Finished loading layer {layer_id - 1} into buffer")
             
             if layer_id > 1:
-                # FIXME: use pos encoding kernel
                 lmc_ops.single_layer_kv_transfer(
                     tmp_gpu_buffer_obj.tensor,
                     kvcaches[layer_id-2][0],
                     kvcaches[layer_id-2][1],
                     slot_mapping_full,
                     False,
+                    False, # shape is [2, num_tokens, hidden_dim]
                 )
                 del self.buffer_mapping[layer_id-2]
                 
@@ -677,11 +685,16 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         buf_start = 0
         slot_mapping_chunks = []
         buf_starts_ends = []
+        old_positions_chunks = []
         for start, end in zip(starts, ends, strict=False):
             buf_end = buffer_start + end - start
             buf_starts_ends.append((buf_start, buf_end))
             slot_mapping_chunks.append(slot_mapping[start:end])
             buf_start = buf_end
+            if self.cache_positions:
+                old_positions_chunks.append(
+                    torch.arange(start, end, device=kvcaches[0].device)
+                )
 
         slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
 
@@ -708,15 +721,20 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                     kvcaches[layer_id][1],
                     slot_mapping_full,
                     True,
+                    False,  # shape is [2, num_tokens, hidden_dim]
                 )
-                for (buf_start, buf_end), memory_obj in zip(
-                    buf_starts_ends, memory_objs_layer, strict=False
+                for (buf_start, buf_end), memory_obj, old_positions in zip(
+                    buf_starts_ends, memory_objs_layer, old_positions_chunks, strict=False
                 ):
                     assert memory_obj.tensor is not None
                     memory_obj.tensor.copy_(
                         tmp_gpu_buffer_obj.tensor[buf_start : buf_end],
                         non_blocking=True,
                     )
+                    if cache_positions:
+                        memory_obj.metadata.old_positions = (
+                            old_positions
+                        )
 
             yield
             self.store_stream.synchronize()

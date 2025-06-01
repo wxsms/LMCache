@@ -41,13 +41,17 @@ class MemoryFormat(Enum):
     """
     # LAYER_KV_BLOB = 2
     KV_T2D = 2
+    """[2, num_tokens, hidden_dim]
+    """
+    
+    KV_2TD = 3
     """Compressed binary array format
     """
-    BINARY = 3
+    BINARY = 4
 
-    BINARY_BUFFER = 4
+    BINARY_BUFFER = 5
 
-    KV_MLA_FMT = 5
+    KV_MLA_FMT = 6
     """[1, num_layers, num_tokens, aligned_head_size]
     """
 
@@ -95,6 +99,9 @@ class MemoryObjMetadata:
 
     # The 'logical' format of the tensor
     fmt: MemoryFormat = MemoryFormat.UNDEFINED
+    
+    # Positions whne the cache is stored 
+    cached_positions: Optional[torch.Tensor] = None
 
     def get_size(self):
         """

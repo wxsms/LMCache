@@ -72,15 +72,19 @@ class LMCBlender:
         
         return old_k, old_v
 
-
+    # NOTE(Jiayi): Exposing this `blend_layer` interface as we might 
+    # want to ochestrate the blending process elsewhere
     def blend_layer(
         self, 
         tokens: torch.Tensor, 
         mask: Optional[torch.Tensor] = None,
         **kwargs,
     ):
+        """
+        Perform layerwiese retrieve + blending.
+        """
         
-        # FIXME: including loading and storing here
+        # TODO(Jiayi): store is currently not included in this function
         
         layerwise_model_executor = self.layerwise_model.compute_layer(tokens)
         layerwise_retriever = self.cache_engine.retrieve_layer(
@@ -97,4 +101,18 @@ class LMCBlender:
         self.metadata.clean()
         yield
         
+    def blend(
+        self, 
+        tokens: torch.Tensor, 
+        mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
+        """
+        Perform blending for the given tokens.
+        """
+        layerwise_blender = self.blend_layer(
+            tokens, mask, **kwargs)
+        
+        for i in range(self.num_layers+2):
+            next(layerwise_blender)
         

@@ -18,6 +18,8 @@ from typing import Dict
 
 from lmcache.v1.compute.blend.blender import LMCBlender
 from lmcache.v1.compute.models.utils import VLLMModelTracker
+from lmcache.v1.cache_engine import CacheEngine
+from lmcache.v1.gpu_connector import GPUConnectorInterface
 
 class LMCacheBlenderBuilder:
     _blenders: Dict[str, LMCBlender] = {}
@@ -26,8 +28,8 @@ class LMCacheBlenderBuilder:
     def get_or_create(
         cls,
         instance_id: str,
-        cache_engine,
-        gpu_connector,
+        cache_engine: CacheEngine,
+        gpu_connector: GPUConnectorInterface,
     ):
         """
         Get or create a blender for the given instance_id.
