@@ -33,6 +33,7 @@ class LMCBlender:
         self.layerwise_model = infer_model_from_vllm(vllm_model)
         self.num_layers = 
         
+        # TODO (Jiayi): make this less hard-coded
         self.common_metadata = LMCBlendCommonMetadata(
             check_layers=[1],
             recomp_ratios=[0.15],

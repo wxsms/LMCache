@@ -179,12 +179,8 @@ def init_lmcache_engine(
         VLLMPagedMemGPUConnectorMLA,
     ]
 
-    # FIXME(Jiayi): support non-environ config
-    env_layerwise = os.getenv("LMCACHE_USE_LAYERWISE", "False")
-    use_layerwise = env_layerwise.lower() in ["true", "1"]
-
     if use_mla:
-        if use_layerwise:
+        if config.use_layerwise:
             raise ValueError("layerwise MLA connector is not supported yet")
         vllm_gpu_connector = VLLMPagedMemGPUConnectorMLA(
             head_size,
@@ -197,7 +193,7 @@ def init_lmcache_engine(
     else:
         hidden_dim_size = num_kv_head * head_size
 
-        if use_layerwise:
+        if config.use_layerwise:
             vllm_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
                 hidden_dim_size,
                 num_layer,

@@ -32,6 +32,7 @@ import vllm.envs as envs
 import zmq
 
 # First Party
+from lmcache.integration.vllm.utils import lmcache_get_config
 from lmcache.integration.vllm.vllm_adapter import init_lmcache_engine
 from lmcache.logging import init_logger
 from lmcache.v1.cache_engine import LayerwiseLMCacheEngine, LMCacheEngine
@@ -361,6 +362,9 @@ class LMCacheConnectorV1Impl:
         self._parent = parent
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         is_tp = vllm_config.parallel_config.tensor_parallel_size > 1
+        
+        config = lmcache_get_config()
+        
         if role == KVConnectorRole.SCHEDULER:
             self.lookup_client = LMCacheLookupClient(role, is_tp, vllm_config)
         else:
@@ -370,7 +374,9 @@ class LMCacheConnectorV1Impl:
                 vllm_config.cache_config,
                 vllm_config.scheduler_config,
             )
-            self.use_layerwise = isinstance(self.lmcache_engine, LayerwiseLMCacheEngine)
+            
+            self.use_layerwise = config.use_layerwise
+            self.enable_blending = config.enable_blending
 
             # NOTE: Only create the KV lookup API server on worker rank 0
             # when there are multiple workers
@@ -400,7 +406,7 @@ class LMCacheConnectorV1Impl:
         )
 
         # FIXME(Jiayi): need to align this chunk size with lmcache
-        self._lmcache_chunk_size = 256
+        self._lmcache_chunk_size = config.chunk_size
 
         self.skip_last_n_tokens = vllm_config.kv_transfer_config.get_from_extra_config(
             "skip_last_n_tokens", 0

@@ -48,7 +48,11 @@ from lmcache.v1.storage_backend.storage_manager import (
     DistributedStorageManager,
     StorageManager,
 )
-from lmcache.v1.token_database import ChunkedTokenDatabase, TokenDatabase
+from lmcache.v1.token_database import (
+    ChunkedTokenDatabase, 
+    SegmentTokenDatabase, 
+    TokenDatabase,
+)
 
 logger = init_logger(__name__)
 
@@ -489,11 +493,6 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
 
         self.num_layers = metadata.kv_shape[0]
-        
-        if enable_blend:
-            # FIXME(Jiayi): Fix this model initialization
-            # need to find a way to get the model pointer
-            self.layerwise_model = 
 
     
     @_lmcache_nvtx_annotate
@@ -504,6 +503,7 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Generator[None, None, None]:
+        # FIXME(Jiayi): change the docstring
         """
         Store the KV cache in a layerwise manner.
 
@@ -773,6 +773,8 @@ class LMCacheEngineBuilder:
         config: LMCacheEngineConfig,
         metadata: LMCacheEngineMetadata,
     ) -> TokenDatabase:
+        if config.enable_blending:
+            return SegmentTokenDatabase(config, metadata)
         return ChunkedTokenDatabase(config, metadata)
 
     @classmethod
@@ -782,7 +784,6 @@ class LMCacheEngineBuilder:
         config: LMCacheEngineConfig,
         metadata: LMCacheEngineMetadata,
         gpu_connector: GPUConnectorInterface,
-        use_layerwise_engine: bool = False,
     ) -> LMCacheEngine:
         """
         Builds a new LMCacheEngine instance if it doesn't already exist for the
@@ -799,7 +800,7 @@ class LMCacheEngineBuilder:
 
             # HACK(Jiayi): Merge two types of engine into one in the future
             engine: Union[LayerwiseLMCacheEngine, LMCacheEngine]
-            if use_layerwise_engine:
+            if config.use_layerwise:
                 engine = LayerwiseLMCacheEngine(
                     config,
                     metadata,
