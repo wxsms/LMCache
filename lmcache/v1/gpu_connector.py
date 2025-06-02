@@ -20,10 +20,12 @@ import abc
 import torch
 
 # First Party
+from lmcache.integration.vllm.utils import ENGINE_NAME
 from lmcache.logging import init_logger
 from lmcache.utils import _lmcache_nvtx_annotate
 from lmcache.v1.memory_management import GPUMemoryAllocator  # noqa: E501
 from lmcache.v1.memory_management import MemoryFormat, MemoryObj
+from lmcache.v1.compute.models.utils import VLLMModelTracker
 import lmcache.c_ops as lmc_ops
 
 logger = init_logger(__name__)
@@ -475,7 +477,8 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         # TODO(Jiayi): remove this hardcode
         self.cache_positions = True
         
-        # FIXME: get rope
+        self.lmc_model = VLLMModelTracker.get_model()
+        self.fused_rotary_emb = self.lmc_model.fused_rotary_emb
 
         if use_gpu:
             assert "dtype" in kwargs, "dtype should be provided to create a GPU buffer."
@@ -557,13 +560,20 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         buf_start = 0
         slot_mapping_chunks = []
         buf_starts_ends = []
+        new_positions_chunks = []
         for start, end in zip(starts, ends, strict=False):
             buf_end = buffer_start + end - start
             buf_starts_ends.append((buf_start, buf_end))
             slot_mapping_chunks.append(slot_mapping[start:end])
             buf_start = buf_end
+            if self.cache_positions:
+                new_positions_chunks.append(
+                    torch.arange(start, end, device=kvcaches[0].device)
+                )
 
         slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
+        if self.cache_positions:
+            new_positions_full = torch.cat(new_positions_chunks, dim=0)
 
         num_tokens = len(slot_mapping_full)
         buffer_shape = self.get_shape(num_tokens)
@@ -584,6 +594,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
 
         current_stream = torch.cuda.current_stream()
 
+        old_positions_full = None
         for layer_id in range(self.num_layers+2):
             
             # FIXME: should we yield in the following two conditional blocks?
@@ -592,9 +603,14 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                 # ping-pong the buffers
                 compute_gpu_buffer_obj, load_gpu_buffer_obj = \
                     load_gpu_buffer_obj, compute_gpu_buffer_obj
-                self.buffer_mapping[layer_id-1] = compute_gpu_buffer_obj
                 
-                # FIXME: recover pos encoding
+                if self.cache_positions:
+                    compute_gpu_buffer_obj.tensor[0] = self.fused_rotary_emb(
+                        old_positions_full, 
+                        new_positions_full, 
+                        compute_gpu_buffer_obj.tensor[0])
+                
+                self.buffer_mapping[layer_id-1] = compute_gpu_buffer_obj
                 
                 logger.debug(f"Finished loading layer {layer_id - 1} into buffer")
             
@@ -615,6 +631,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                 
                 # memobj -> gpu_buffer
                 with torch.cuda.stream(self.load_stream):
+                    old_positions_chunks = []
                     for (buf_start, buf_end), memory_obj in zip(
                         buf_starts_ends, memory_objs_layer, strict=False
                     ):
@@ -622,6 +639,13 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                         load_gpu_buffer_obj.tensor[buf_start : buf_end].copy_(
                             memory_obj.tensor, non_blocking=True
                         )
+                        if self.cache_positions and old_positions_full is None:
+                            old_positions_chunks.append(
+                                memory_obj.metadata.old_positions
+                            )
+                    if not old_positions_full:
+                        old_positions_full = torch.cat(
+                            old_positions_chunks, dim=0)
                 
                 memory_objs_layer = yield
                 current_stream.wait_stream(self.load_stream)
@@ -732,9 +756,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                         non_blocking=True,
                     )
                     if cache_positions:
-                        memory_obj.metadata.old_positions = (
-                            old_positions
-                        )
+                        memory_obj.metadata.old_positions = old_positions
 
             yield
             self.store_stream.synchronize()

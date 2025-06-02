@@ -15,6 +15,8 @@
 import torch
 from torch import nn
 
+from lmcache.v1.blend.positional_encoding import get_fused_rope
+
 # FIXME(Jiayi): A few things need to be tested/supported:
 # PP, Multimodal
 
@@ -30,6 +32,23 @@ class LMCLlamaModel(nn.Module):
         self.attn_layers = 
         
         self.blender = 
+        
+        # remove hard code
+        head_dim = 128
+        max_position_embeddings = 8192
+        rope_scaling = None
+        rope_theta = 500000.0
+        is_neox_style = True
+        dtype = torch.bfloat16
+        self.fused_rotary_emb = get_fused_rope(
+            head_dim=head_dim,
+            max_position_embeddings=max_position_embeddings,
+            rope_scaling=rope_scaling,
+            rope_theta=rope_theta,
+            is_neox_style=is_neox_style,
+            dtype=dtype,
+        )
+        
     
     def compute_layer(
         self,
