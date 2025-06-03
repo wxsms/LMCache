@@ -17,7 +17,6 @@ from copy import deepcopy
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 import dataclasses
-import os
 
 # Third Party
 from torch.nn.utils.rnn import pad_sequence
@@ -212,7 +211,7 @@ def init_lmcache_engine(
                 device=device,
             )
     engine = LMCacheEngineBuilder.get_or_create(
-        ENGINE_NAME, config, metadata, vllm_gpu_connector, use_layerwise
+        ENGINE_NAME, config, metadata, vllm_gpu_connector
     )
 
     return engine

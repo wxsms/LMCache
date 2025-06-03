@@ -332,12 +332,12 @@ void single_layer_kv_transfer(
         vllm_value_cache,  // [num_blocks, block_size, num_heads, head_size]
                            // key_cache/value_cache must be on gpu
     torch::Tensor& slot_mapping,  // [num_tokens]
-    const bool direction,  // false: LMCache to PagedBuffer, true: PagedBuffer to
-                           // LMCache
-    const bool token_major = true // true: lmc_key_value_cache is
-                                  // [num_tokens, 2, num_heads*head_size]
-                                  // false: lmc_key_value_cache is
-                                  // [2, num_tokens, num_heads*head_size]
+    const bool direction,   // false: LMCache to PagedBuffer, true: PagedBuffer
+                            // to LMCache
+    const bool token_major  // true: lmc_key_value_cache is
+                            // [num_tokens, 2, num_heads*head_size]
+                            // false: lmc_key_value_cache is
+                            // [2, num_tokens, num_heads*head_size]
 ) {
   // int64_t* lmc_key_cache_ptr = get_kernel_ptr<int64_t,
   // torch::Tensor>(lmc_key_cache); int64_t* lmc_value_cache_ptr =
@@ -360,7 +360,7 @@ void single_layer_kv_transfer(
   int head_size_in_64bit = vllm_key_cache.size(3) / elements_per_entry;
 
   int block_size = vllm_key_cache.size(1);
-  
+
   int lmc_stride;
   int lmc_value_offset;
   if (token_major) {

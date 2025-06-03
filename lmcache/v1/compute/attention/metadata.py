@@ -12,14 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import abc
-from typing 
+# Standard
 from dataclasses import dataclass
 
+# Third Party
 import torch
 
-class LMCAttnMetadata(metaclass=abc.ABCMeta):
+
+@dataclass
+class LMCAttnMetadata:
     pass
+
 
 @dataclass
 class LMCFlashAttnMetadata(LMCAttnMetadata):
@@ -27,4 +30,3 @@ class LMCFlashAttnMetadata(LMCAttnMetadata):
     seq_lens: torch.Tensor
     max_query_len: torch.Tensor
     max_seq_len: torch.Tensor
-    scheduler_metadata: Optional[torch.Tensor] = None

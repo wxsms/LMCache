@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Standard
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
+# Third Party
 import torch
 
 
@@ -24,9 +26,11 @@ class LMCBlendCommonMetadata:
     Metadata for blending operations in LMCache.
     This class holds the necessary information for blending computations.
     """
+
     check_layers: List[int]
     recomp_ratios: Optional[List[float]] = None
     thresholds: Optional[List[float]] = None
+
 
 @dataclass
 class LMCBlendMetadata:
@@ -34,9 +38,10 @@ class LMCBlendMetadata:
     Metadata for blending operations in LMCache.
     This class holds the necessary information for blending computations.
     """
+
     imp_indices: Optional[torch.Tensor] = None
     attn_mask: Optional[torch.Tensor] = None
-    
+
     def clean(self):
         self.imp_indices = None
         self.attn_mask = None

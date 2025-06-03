@@ -12,13 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-from torch import nn
+# Standard
 from typing import Dict
+
+# Third Party
+from torch import nn
+
+# First Party
+from lmcache.logging import init_logger
+
+logger = init_logger(__name__)
+
+
 # TODO (Jiayi): Need to infer the model type from vllm model
 
-def infer_model_from_vllm(vllm_model):
-    pass
+
+def infer_model_from_vllm(vllm_model, blender):
+    model_name = type(vllm_model).__name__
+    if model_name == "LlamaForCausalLM":
+        # First Party
+        from lmcache.v1.compute.models.llama import LMCLlamaModel
+
+        return LMCLlamaModel(vllm_model, blender)
+    else:
+        # TODO(Jiayi): Add support for more models
+        raise NotImplementedError(
+            f"Model type {model_name} is not supported in LMCache."
+        )
+
 
 class VLLMModelTracker:
     _vllm_models: Dict[str, nn.Module] = {}
@@ -36,8 +57,10 @@ class VLLMModelTracker:
         if instance_id not in cls._vllm_models:
             cls._vllm_models[instance_id] = vllm_model
         else:
-            logger.warning(f"vllm model for {instance_id} already registered, doing nothing.")
-    
+            logger.warning(
+                f"vllm model for {instance_id} already registered, doing nothing."
+            )
+
     @classmethod
     def get_model(
         cls,
@@ -49,4 +72,3 @@ class VLLMModelTracker:
         if instance_id not in cls._vllm_models:
             raise ValueError(f"vllm model for {instance_id} not found.")
         return cls._vllm_models[instance_id]
-        

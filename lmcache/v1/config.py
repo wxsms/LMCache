@@ -52,8 +52,8 @@ class LMCacheEngineConfig:
     remote_url: Optional[str]
     remote_serde: Optional[str]  # Can be "naive" or "cachegen"
 
-    use_layerwise: bool = False  # whether to use layerwise pipelining
-    
+    use_layerwise: bool  # whether to use layerwise pipelining
+
     save_decode_cache: bool  # whether to store decode kv cache
 
     # Blending related configurations
@@ -264,7 +264,7 @@ class LMCacheEngineConfig:
 
         remote_url = config.get("remote_url", None)
         remote_serde = config.get("remote_serde", "naive")
-        
+
         use_layerwise = config.get("use_layerwise", False)
 
         save_decode_cache = config.get("save_decode_cache", False)
@@ -414,11 +414,11 @@ class LMCacheEngineConfig:
         config.remote_serde = parse_env(
             get_env_name("remote_serde"), config.remote_serde
         )
-        
+
         config.use_layerwise = to_bool(
             parse_env(get_env_name("use_layerwise"), config.use_layerwise)
         )
-        
+
         config.save_decode_cache = to_bool(
             parse_env(get_env_name("save_decode_cache"), config.save_decode_cache)
         )

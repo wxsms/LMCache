@@ -12,32 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-from torch import nn
+# Standard
 from typing import Dict
 
+# Third Party
+from torch import nn
+
+# First Party
+from lmcache.logging import init_logger
+from lmcache.v1.cache_engine import LMCacheEngine
 from lmcache.v1.compute.blend.blender import LMCBlender
 from lmcache.v1.compute.models.utils import VLLMModelTracker
-from lmcache.v1.cache_engine import CacheEngine
 from lmcache.v1.gpu_connector import GPUConnectorInterface
 
-class LMCacheBlenderBuilder:
+logger = init_logger(__name__)
+
+
+class LMCBlenderBuilder:
     _blenders: Dict[str, LMCBlender] = {}
 
     @classmethod
     def get_or_create(
         cls,
         instance_id: str,
-        cache_engine: CacheEngine,
+        cache_engine: LMCacheEngine,
         gpu_connector: GPUConnectorInterface,
     ):
         """
         Get or create a blender for the given instance_id.
         """
-        
+
         if instance_id not in cls._blenders:
             logger.info(f"Creating blender for {instance_id}")
-            vllm_model = VLLMModelTracker.get(instance_id)
+            vllm_model = VLLMModelTracker.get_model(instance_id)
             blender = LMCBlender(
                 cache_engine=cache_engine,
                 gpu_connector=gpu_connector,
@@ -45,9 +52,11 @@ class LMCacheBlenderBuilder:
             )
             cls._blenders[instance_id] = blender
         else:
-            logger.info(f"Blender for {instance_id} already exists, returning the original one.")
+            logger.info(
+                f"Blender for {instance_id} already exists, returning the original one."
+            )
         return cls._blenders[instance_id]
-    
+
     @classmethod
     def get(
         cls,
