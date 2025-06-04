@@ -234,6 +234,8 @@ class SegmentTokenDatabase(TokenDatabase):
         for idx in matches:
             yield tokens[start:idx]
             start = idx + self.sep_len
+        # yield last chunk
+        yield tokens[start:]
 
     def process_tokens(
         self,
@@ -268,6 +270,7 @@ class SegmentTokenDatabase(TokenDatabase):
             "The number of Falses in the mask shouldn't "
             "be less than the length of tokens."
         )
+
         token_chunks = self._fast_split_by_subtensor(tokens)
         start_idx = 0
         for idx, token_chunk in enumerate(token_chunks):
@@ -276,6 +279,7 @@ class SegmentTokenDatabase(TokenDatabase):
             if idx > 0:
                 start_idx += self.sep_len
                 end_idx += self.sep_len
+                # end_idx = min(end_idx, len(tokens))
             if start_idx >= num_falses:
                 if make_key:
                     yield (

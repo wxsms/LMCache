@@ -6,6 +6,7 @@ import os
 import time
 
 # Third Party
+from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.config import KVTransferConfig
 from vllm.engine.arg_utils import EngineArgs
@@ -26,6 +27,7 @@ def setup_environment_variables(
     # Blending related config
     os.environ["LMCACHE_ENABLE_BLENDING"] = "True"
     os.environ["LMCACHE_BLEND_SPECIAL_STR"] = blend_special_str
+    os.environ["LMCACHE_USE_LAYERWISE"] = "True"
 
     if use_disk:
         # Disable local CPU backend in LMCache
@@ -72,12 +74,12 @@ def build_llm_with_lmcache(lmcache_connector: str, model: str):
 
 def print_output(
     llm: LLM,
-    prompt: list[str],
+    prompt: list[int],
     sampling_params: SamplingParams,
     req_str: str,
 ):
     start = time.time()
-    outputs = llm.generate(prompt, sampling_params)
+    outputs = llm.generate(prompt_token_ids=prompt, sampling_params=sampling_params)
     print("-" * 50)
     for output in outputs:
         generated_text = output.outputs[0].text
@@ -98,7 +100,7 @@ def parse_args():
     parser.add_argument(
         "-b",
         "--blend-special-str",
-        default=" # # ",
+        default="# #",
         help="Specify whether to use disk as backend (default: False)",
     )
 
@@ -113,32 +115,34 @@ def main():
 
     setup_environment_variables(args.use_disk, args.blend_special_str)
 
+    tokenizer = AutoTokenizer.from_pretrained(model)
+
     with build_llm_with_lmcache(lmcache_connector, model) as llm:
         # This example script runs two requests with a shared prefix.
         # Define the shared prompt and specific prompts
-        sys_prompt = "You are a very helpful assistant."
-        chunk1_prompt = "Hello, how are you?" * 500
-        chunk2_prompt = "Hello, what's up?" * 500
-        blend_special_str = os.getenv("LMCACHE_BLEND_SPECIAL_STR")
-        first_prompt = [
+        sys_prompt = tokenizer.encode("You are a very helpful assistant.")
+        chunk1_prompt = tokenizer.encode("Hello, how are you?" * 500)[1:]
+        chunk2_prompt = tokenizer.encode("Hello, what's up?" * 500)[1:]
+        blend_special_str = tokenizer.encode(os.getenv("LMCACHE_BLEND_SPECIAL_STR"))[1:]
+        first_prompt = (
             sys_prompt
             + blend_special_str
             + chunk1_prompt
             + blend_special_str
             + chunk2_prompt
             + blend_special_str
-            + "Hello, my name is",
-        ]
+            + tokenizer.encode("Hello, my name is")[1:]
+        )
 
-        second_prompt = [
+        second_prompt = (
             sys_prompt
             + blend_special_str
             + chunk2_prompt
             + blend_special_str
             + chunk1_prompt
             + blend_special_str
-            + "Hello, how are you?",
-        ]
+            + tokenizer.encode("Hello, how are you?")[1:]
+        )
 
         sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
 

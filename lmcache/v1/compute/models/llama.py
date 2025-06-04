@@ -19,7 +19,7 @@ import torch
 # First Party
 from lmcache.v1.compute.attention.flash_attn import LMCFlashAttnBackend
 from lmcache.v1.compute.attention.metadata import LMCFlashAttnMetadata
-from lmcache.v1.compute.blend.positional_encoding import get_fused_rope
+from lmcache.v1.compute.positional_encoding import get_fused_rope
 
 # FIXME(Jiayi): A few things need to be tested/supported:
 # PP, Multimodal
@@ -31,14 +31,17 @@ class LMCLlamaModel(nn.Module):
         vllm_model,
         blender,
     ):
+        super().__init__()
         self.vllm_model = vllm_model
 
         self.num_layers = len(vllm_model.model.layers)
 
-        self.attn_layers = []
+        self.vllm_attn_layers = []
+        self.lmc_attn_layers = []
         for i in range(self.num_layers):
-            vllm_attn = vllm_model.model.layers[i].self_attn
-            self.attn_layers.append(LMCFlashAttnBackend(vllm_attn))
+            vllm_attn = vllm_model.model.layers[i].self_attn.attn
+            self.vllm_attn_layers.append(vllm_attn)
+            self.lmc_attn_layers.append(LMCFlashAttnBackend(vllm_attn))
 
         # NOTE(Jiayi): better not to pass the blender in init
         # if we want to make this LMCModel more general.
@@ -55,7 +58,7 @@ class LMCLlamaModel(nn.Module):
         self.fused_rotary_emb = get_fused_rope(
             head_dim,
             rotary_dim=head_dim,
-            max_position_embeddings=max_position_embeddings,
+            max_position=max_position_embeddings,
             base=base,
             rope_scaling=rope_scaling,
             is_neox_style=is_neox_style,
@@ -66,20 +69,28 @@ class LMCLlamaModel(nn.Module):
         self,
         input_ids: torch.Tensor,
     ):
-        hidden_states = self.vllm_model.get_input_embeddings(input_ids)
+        hidden_states = self.vllm_model.get_input_embeddings(input_ids.cuda())
         residual = None
+
+        # TODO (Jiayi): reduce the number of calls
+        attn_output = None
 
         # TODO(Jiayi): Need to build `attn_metadata` more elegantly.
         attn_metadata = LMCFlashAttnMetadata(
-            query_start_loc=torch.tensor([0]),
-            seq_lens=torch.tensor([input_ids.shape[0]]),
+            query_start_loc=torch.tensor(
+                [0, input_ids.shape[0]], dtype=torch.int32, device=hidden_states.device
+            ),
+            seq_lens=torch.tensor([input_ids.shape[0]], device=hidden_states.device),
+            cu_seqlens_k=torch.tensor(
+                [0, input_ids.shape[0]], dtype=torch.int32, device=hidden_states.device
+            ),
             max_query_len=input_ids.shape[0],
             max_seq_len=input_ids.shape[0],
         )
 
         for idx, layer in enumerate(
-            self.vllm_model.layers[
-                self.vllm_model.start_layer : self.vllm_model.end_layer
+            self.vllm_model.model.layers[
+                self.vllm_model.model.start_layer : self.vllm_model.model.end_layer
             ]
         ):
             # TODO(Jiayi) The last layer doesn't have to be computed
@@ -104,16 +115,26 @@ class LMCLlamaModel(nn.Module):
                 dim=-1,
             )
 
-            # NOTE: do rope somewhere else
-            # q, k = self.rotary_emb(positions, q, k)
-            q, k, v, residual, attn_metadata = self.blender.process_qkv(
-                q, k, v, residual, idx, attn_metadata
+            q, k, v, residual, attn_output, attn_metadata = self.blender.process_qkv(
+                q, k, v, residual, idx, attn_output, attn_metadata
             )
 
-            # TODO: Fix this, make this our customized attention
-            attn_output = self.attn_layers[idx].forward_contiguous(
-                q, k, v, self.output, attn_metadata
+            num_heads = self.vllm_attn_layers[idx].num_heads
+            num_kv_heads = self.vllm_attn_layers[idx].num_kv_heads
+            head_size = self.vllm_attn_layers[idx].head_size
+
+            q = q.view(-1, num_heads, head_size)
+            k = k.view(-1, num_kv_heads, head_size)
+            v = v.view(-1, num_kv_heads, head_size)
+            attn_output = attn_output.view(-1, num_heads, head_size)
+
+            attn_output = self.lmc_attn_layers[idx].forward_contiguous(
+                q, k, v, attn_output, attn_metadata
             )
+
+            attn_output = attn_output.view(-1, num_heads * head_size)
+            k = k.view(-1, num_kv_heads * head_size)
+            v = v.view(-1, num_kv_heads * head_size)
 
             hidden_states, _ = layer.self_attn.o_proj(attn_output)
 

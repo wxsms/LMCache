@@ -14,7 +14,7 @@
 
 # Third Party
 from vllm.attention import Attention
-from vllm.v1.attention.flash_attn import FlashAttentionImpl
+from vllm.v1.attention.backends.flash_attn import FlashAttentionImpl
 from vllm.vllm_flash_attn import flash_attn_varlen_func, get_scheduler_metadata
 import torch
 
@@ -37,6 +37,9 @@ class LMCFlashAttnBackend(AttentionInterface):
         self.vllm_attn = vllm_attn
         self.vllm_attn_impl: FlashAttentionImpl = vllm_attn.impl
 
+        # TODO(Jiayi): remove this hardcode
+        self.aot_schedule = False
+
     def forward_contiguous(
         self,
         query: torch.Tensor,
@@ -46,10 +49,11 @@ class LMCFlashAttnBackend(AttentionInterface):
         attn_metadata: LMCFlashAttnMetadata,
         **kwargs,
     ) -> torch.Tensor:
-        num_actual_tokens = query.shape[0]
+        # num_actual_tokens = query.shape[0]
 
         cu_seqlens_q = attn_metadata.query_start_loc
         seqused_k = attn_metadata.seq_lens
+        cu_seqlens_k = attn_metadata.cu_seqlens_k
         max_seqlen_q = attn_metadata.max_query_len
         max_seqlen_k = attn_metadata.max_seq_len
 
@@ -69,10 +73,11 @@ class LMCFlashAttnBackend(AttentionInterface):
             q=query,  # contiguous
             k=key,  # contiguous
             v=value,  # contiguous
-            out=output[:num_actual_tokens],
+            out=output,
             cu_seqlens_q=cu_seqlens_q,
             max_seqlen_q=max_seqlen_q,
-            seqused_k=seqused_k,
+            cu_seqlens_k=cu_seqlens_k,
+            # seqused_k=seqused_k,
             max_seqlen_k=max_seqlen_k,
             softmax_scale=self.vllm_attn_impl.scale,
             causal=True,
@@ -92,7 +97,7 @@ class LMCFlashAttnBackend(AttentionInterface):
     def _schedule(
         self, batch_size, cu_query_lens, max_query_len, seqlens, max_seq_len, causal
     ):
-        if self.vllm_attn_impl.aot_schedule:
+        if self.aot_schedule:
             return get_scheduler_metadata(
                 batch_size=batch_size,
                 max_seqlen_q=max_query_len,

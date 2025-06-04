@@ -20,9 +20,10 @@ import abc
 import torch
 
 # First Party
+from lmcache.integration.vllm.utils import ENGINE_NAME
 from lmcache.logging import init_logger
 from lmcache.utils import _lmcache_nvtx_annotate
-from lmcache.v1.compute.models.utils import VLLMModelTracker
+from lmcache.v1.compute.blend.utils import LMCBlenderBuilder
 from lmcache.v1.memory_management import GPUMemoryAllocator  # noqa: E501
 from lmcache.v1.memory_management import MemoryFormat, MemoryObj
 import lmcache.c_ops as lmc_ops
@@ -475,8 +476,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         # TODO(Jiayi): remove this hardcode
         self.cache_positions = True
 
-        self.lmc_model = VLLMModelTracker.get_model()
-        self.fused_rotary_emb = self.lmc_model.fused_rotary_emb
+        self.fused_rotary_emb = None
 
         if use_gpu:
             assert "dtype" in kwargs, "dtype should be provided to create a GPU buffer."
@@ -552,6 +552,17 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
 
         """
 
+        if "kvcaches" not in kwargs:
+            raise ValueError("'kvcaches' should be provided in kwargs.")
+
+        if "slot_mapping" not in kwargs:
+            raise ValueError("'slot_mapping' should be provided in kwargs.")
+
+        if self.fused_rotary_emb is None:
+            # TODO(Jiayi): Make this more elegant
+            self.lmc_model = LMCBlenderBuilder.get(ENGINE_NAME).layerwise_model
+            self.fused_rotary_emb = self.lmc_model.fused_rotary_emb
+
         kvcaches: List[torch.Tensor] = kwargs["kvcaches"]
         slot_mapping: torch.Tensor = kwargs["slot_mapping"]
 
@@ -561,7 +572,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         buf_offset = starts[0]
         if self.cache_positions:
             new_positions_full = torch.arange(
-                starts[0], ends[-1], device=kvcaches[0].device
+                starts[0], ends[-1], dtype=torch.int64, device=kvcaches[0].device
             )
 
         buffer_shape = self.get_shape(num_all_tokens)
@@ -580,13 +591,30 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         assert compute_gpu_buffer_obj.tensor is not None
         assert load_gpu_buffer_obj.tensor is not None
 
-        current_stream = torch.cuda.current_stream()
+        # current_stream = torch.cuda.current_stream()
 
         if self.cache_positions:
-            old_positions_full = torch.zeros((num_all_tokens,))
+            old_positions_full = torch.zeros(
+                (num_all_tokens,), dtype=torch.int64, device=kvcaches[0].device
+            )
         for layer_id in range(self.num_layers + 2):
-            # FIXME: should we yield in the following two conditional blocks?
+            if layer_id > 1:
+                lmc_ops.single_layer_kv_transfer(
+                    self.buffer_mapping[layer_id - 2].tensor,
+                    kvcaches[layer_id - 2][0],
+                    kvcaches[layer_id - 2][1],
+                    slot_mapping_full,
+                    False,
+                    False,  # shape is [2, num_tokens, hidden_dim]
+                )
+                del self.buffer_mapping[layer_id - 2]
+
+                logger.debug(f"Finished loading layer {layer_id - 2} into paged memory")
+
             if layer_id > 0 and layer_id <= self.num_layers:
+                # NOTE: wait until both compute and load streams are done
+                torch.cuda.synchronize()
+
                 # ping-pong the buffers
                 compute_gpu_buffer_obj, load_gpu_buffer_obj = (
                     load_gpu_buffer_obj,
@@ -595,6 +623,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
 
                 if self.cache_positions:
                     assert compute_gpu_buffer_obj.tensor is not None
+
                     compute_gpu_buffer_obj.tensor[0] = self.fused_rotary_emb(
                         old_positions_full,
                         new_positions_full,
@@ -605,22 +634,8 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
 
                 logger.debug(f"Finished loading layer {layer_id - 1} into buffer")
 
-            if layer_id > 1:
-                lmc_ops.single_layer_kv_transfer(
-                    compute_gpu_buffer_obj.tensor,
-                    kvcaches[layer_id - 2][0],
-                    kvcaches[layer_id - 2][1],
-                    slot_mapping_full,
-                    False,
-                    False,  # shape is [2, num_tokens, hidden_dim]
-                )
-                del self.buffer_mapping[layer_id - 2]
-
-                logger.debug(f"Finished loading layer {layer_id - 1} into paged memory")
-
             if layer_id < self.num_layers:
                 memory_objs_layer = yield
-                current_stream.wait_stream(self.load_stream)
 
                 # memobj -> gpu_buffer
                 with torch.cuda.stream(self.load_stream):
@@ -629,15 +644,21 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                     ):
                         assert memory_obj.metadata.fmt == MemoryFormat.KV_2TD
                         assert load_gpu_buffer_obj.tensor is not None
-                        load_gpu_buffer_obj.tensor[
+                        load_gpu_buffer_obj.tensor[0][
                             start - buf_offset : end - buf_offset
-                        ].copy_(memory_obj.tensor, non_blocking=True)
+                        ].copy_(memory_obj.tensor[0], non_blocking=True)
+
+                        load_gpu_buffer_obj.tensor[1][
+                            start - buf_offset : end - buf_offset
+                        ].copy_(memory_obj.tensor[1], non_blocking=True)
+
                         if self.cache_positions and layer_id == 0:
                             old_positions_full[
                                 start - buf_offset : end - buf_offset
                             ] = memory_obj.metadata.old_positions
 
-        yield
+            elif layer_id == self.num_layers:
+                yield
 
         # free the buffer memory
         load_gpu_buffer_obj.ref_count_down()
@@ -692,6 +713,11 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
         if "slot_mapping" not in kwargs:
             raise ValueError("'slot_mapping' should be provided in kwargs.")
 
+        if self.fused_rotary_emb is None:
+            # TODO(Jiayi): Make this more elegant
+            self.lmc_model = LMCBlenderBuilder.get(ENGINE_NAME).layerwise_model
+            self.fused_rotary_emb = self.lmc_model.fused_rotary_emb
+
         kvcaches: List[torch.Tensor] = kwargs["kvcaches"]
         slot_mapping: torch.Tensor = kwargs["slot_mapping"]
 
@@ -706,7 +732,9 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
             buf_start = buf_end
             if self.cache_positions:
                 old_positions_chunks.append(
-                    torch.arange(start, end, device=kvcaches[0].device)
+                    torch.arange(
+                        start, end, device=kvcaches[0].device, dtype=torch.int64
+                    )
                 )
 
         slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
@@ -743,8 +771,12 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
                     strict=False,
                 ):
                     assert memory_obj.tensor is not None
-                    memory_obj.tensor.copy_(
-                        tmp_gpu_buffer_obj.tensor[buf_start:buf_end],
+                    memory_obj.tensor[0].copy_(
+                        tmp_gpu_buffer_obj.tensor[0][buf_start:buf_end],
+                        non_blocking=True,
+                    )
+                    memory_obj.tensor[1].copy_(
+                        tmp_gpu_buffer_obj.tensor[1][buf_start:buf_end],
                         non_blocking=True,
                     )
                     if self.cache_positions:
@@ -889,6 +921,7 @@ class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
                     kvcaches[layer_id][1],
                     slot_mapping_full,
                     False,
+                    True,
                 )
         yield
 
@@ -973,6 +1006,7 @@ class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
                     kvcaches[layer_id][0],
                     kvcaches[layer_id][1],
                     slot_mapping_full,
+                    True,
                     True,
                 )
                 for start, end, memory_obj in zip(

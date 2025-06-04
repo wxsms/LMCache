@@ -13,17 +13,20 @@
 # limitations under the License.
 
 # Standard
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
 
 # Third Party
 from torch import nn
 
 # First Party
 from lmcache.logging import init_logger
-from lmcache.v1.cache_engine import LMCacheEngine
 from lmcache.v1.compute.blend.blender import LMCBlender
 from lmcache.v1.compute.models.utils import VLLMModelTracker
-from lmcache.v1.gpu_connector import GPUConnectorInterface
+
+if TYPE_CHECKING:
+    # First Party
+    from lmcache.v1.cache_engine import LMCacheEngine
+    from lmcache.v1.gpu_connector import GPUConnectorInterface
 
 logger = init_logger(__name__)
 
@@ -35,8 +38,8 @@ class LMCBlenderBuilder:
     def get_or_create(
         cls,
         instance_id: str,
-        cache_engine: LMCacheEngine,
-        gpu_connector: GPUConnectorInterface,
+        cache_engine: "LMCacheEngine",
+        gpu_connector: "GPUConnectorInterface",
     ):
         """
         Get or create a blender for the given instance_id.

@@ -48,6 +48,7 @@ from lmcache.utils import _lmcache_nvtx_annotate
 from lmcache.v1.cache_engine import LMCacheEngine, LMCacheEngineBuilder
 from lmcache.v1.config import LMCacheEngineConfig
 from lmcache.v1.gpu_connector import (
+    VLLMBufferLayerwiseGPUConnector,
     VLLMPagedMemGPUConnectorMLA,
     VLLMPagedMemGPUConnectorV2,
     VLLMPagedMemLayerwiseGPUConnector,
@@ -193,14 +194,25 @@ def init_lmcache_engine(
         hidden_dim_size = num_kv_head * head_size
 
         if config.use_layerwise:
-            vllm_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
-                hidden_dim_size,
-                num_layer,
-                use_gpu=use_gpu,
-                chunk_size=chunk_size,
-                dtype=kv_dtype,
-                device=device,
-            )
+            if config.enable_blending:
+                # Use layerwise connector for blending
+                vllm_gpu_connector = VLLMBufferLayerwiseGPUConnector(
+                    hidden_dim_size,
+                    num_layer,
+                    use_gpu=use_gpu,
+                    chunk_size=chunk_size,
+                    dtype=kv_dtype,
+                    device=device,
+                )
+            else:
+                vllm_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
+                    hidden_dim_size,
+                    num_layer,
+                    use_gpu=use_gpu,
+                    chunk_size=chunk_size,
+                    dtype=kv_dtype,
+                    device=device,
+                )
         else:
             vllm_gpu_connector = VLLMPagedMemGPUConnectorV2(
                 hidden_dim_size,

@@ -28,5 +28,6 @@ class LMCAttnMetadata:
 class LMCFlashAttnMetadata(LMCAttnMetadata):
     query_start_loc: torch.Tensor
     seq_lens: torch.Tensor
+    cu_seqlens_k: torch.Tensor
     max_query_len: torch.Tensor
     max_seq_len: torch.Tensor

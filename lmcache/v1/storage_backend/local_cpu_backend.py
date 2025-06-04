@@ -59,7 +59,6 @@ class LocalCPUBackend(StorageBackendInterface):
         memory_allocator: MemoryAllocatorInterface,
         lookup_server: Optional[LookupServerInterface] = None,
         lmcache_worker: Optional["LMCacheWorker"] = None,
-        layerwise: bool = False,
     ):
         self.hot_cache: OrderedDict[CacheEngineKey, MemoryObj] = OrderedDict()
         self.use_hot = config.local_cpu
@@ -73,7 +72,8 @@ class LocalCPUBackend(StorageBackendInterface):
 
         self.stats_monitor = LMCStatsMonitor.GetOrCreate()
         self.usage = 0
-        self.layerwise = layerwise
+        self.layerwise = config.use_layerwise
+        self.enable_blending = config.enable_blending
 
     def __str__(self):
         return self.__class__.__name__
@@ -208,7 +208,10 @@ class LocalCPUBackend(StorageBackendInterface):
         """
         if fmt is None:
             if self.layerwise:
-                fmt = MemoryFormat.KV_T2D
+                if self.enable_blending:
+                    fmt = MemoryFormat.KV_2TD
+                else:
+                    fmt = MemoryFormat.KV_T2D
             else:
                 fmt = MemoryFormat.KV_2LTD
 

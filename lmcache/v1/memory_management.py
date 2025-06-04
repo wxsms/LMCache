@@ -43,7 +43,7 @@ class MemoryFormat(Enum):
     KV_T2D = 2
     """[2, num_tokens, hidden_dim]
     """
-    
+
     KV_2TD = 3
     """Compressed binary array format
     """
@@ -99,8 +99,8 @@ class MemoryObjMetadata:
 
     # The 'logical' format of the tensor
     fmt: MemoryFormat = MemoryFormat.UNDEFINED
-    
-    # Positions whne the cache is stored 
+
+    # Positions when the cache is stored
     cached_positions: Optional[torch.Tensor] = None
 
     def get_size(self):
@@ -841,6 +841,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             return self.buffer_allocator.allocate(shape, dtype, fmt)
         elif fmt in [
             MemoryFormat.KV_2LTD,
+            MemoryFormat.KV_2TD,
             MemoryFormat.KV_T2D,
             MemoryFormat.KV_MLA_FMT,
         ]:
@@ -863,6 +864,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             self.buffer_allocator.free(memory_obj)
         elif fmt in [
             MemoryFormat.KV_2LTD,
+            MemoryFormat.KV_2TD,
             MemoryFormat.KV_T2D,
             MemoryFormat.KV_MLA_FMT,
         ]:

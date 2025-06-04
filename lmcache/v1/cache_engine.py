@@ -34,6 +34,7 @@ from lmcache.v1.distributed_server import (
 )
 from lmcache.v1.gpu_connector import (
     GPUConnectorInterface,
+    VLLMBufferLayerwiseGPUConnector,
     VLLMPagedMemLayerwiseGPUConnector,
 )
 from lmcache.v1.lookup_server import LookupServerInterface, RedisLookupServer
@@ -49,8 +50,8 @@ from lmcache.v1.storage_backend.storage_manager import (
     StorageManager,
 )
 from lmcache.v1.token_database import (
-    ChunkedTokenDatabase, 
-    SegmentTokenDatabase, 
+    ChunkedTokenDatabase,
+    SegmentTokenDatabase,
     TokenDatabase,
 )
 
@@ -85,7 +86,6 @@ class LMCacheEngine:
         memory_allocator: MemoryAllocatorInterface,
         token_database: TokenDatabase,
         gpu_connector: GPUConnectorInterface,
-        layerwise: bool = False,
     ):
         logger.info(f"Creating LMCacheEngine with config: {config}")
         self.config = config
@@ -124,7 +124,6 @@ class LMCacheEngine:
                 self.memory_allocator,
                 self.lmcache_worker,
                 self.lookup_server,
-                layerwise,
             )  # type: ignore[assignment]
 
         if self.enable_p2p:
@@ -477,8 +476,6 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         memory_allocator: MemoryAllocatorInterface,
         token_database: TokenDatabase,
         layerwise_gpu_connector: GPUConnectorInterface,
-        layerwise: bool = True,
-        enable_blend: bool = False,
     ):
         super().__init__(
             config,
@@ -486,15 +483,20 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             memory_allocator,
             token_database,
             layerwise_gpu_connector,
-            layerwise,
         )
-        
-        # FIXME(Jiayi): fix this assert
-        assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+
+        assert isinstance(
+            self.gpu_connector,
+            (VLLMPagedMemLayerwiseGPUConnector, VLLMBufferLayerwiseGPUConnector),
+        )
 
         self.num_layers = metadata.kv_shape[0]
 
-    
+        if config.enable_blending:
+            self.fmt = MemoryFormat.KV_2TD
+        else:
+            self.fmt = MemoryFormat.KV_T2D
+
     @_lmcache_nvtx_annotate
     @torch.inference_mode()
     def store_layer(
@@ -554,7 +556,7 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             no_space_left = False
             for layer_id in range(self.num_layers):
                 mem_obj_single_layer = self.storage_manager.allocate(
-                    kv_shape_single_layer, kv_dtype, fmt=MemoryFormat.KV_T2D
+                    kv_shape_single_layer, kv_dtype, fmt=self.fmt
                 )
 
                 if mem_obj_single_layer is None:
@@ -586,7 +588,11 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             memory_objs = [list(row) for row in zip(*memory_objs, strict=False)]
             keys = [list(row) for row in zip(*keys, strict=False)]
 
-            assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+            assert isinstance(
+                self.gpu_connector,
+                (VLLMPagedMemLayerwiseGPUConnector, VLLMBufferLayerwiseGPUConnector),
+            )
+
             mem_obj_generator = self.gpu_connector.batched_from_gpu(
                 memory_objs, starts, ends, **kwargs
             )
@@ -615,7 +621,6 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Generator[Optional[torch.Tensor], None, None]:
-        
         # FIXME: fix the comment here
         """
         Retrieve the KV cache in a layerwise manner.
@@ -672,7 +677,13 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
 
             get_generator = self.storage_manager.layerwise_batched_get(keys_layer_major)
 
-            assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+            assert isinstance(
+                self.gpu_connector,
+                (
+                    VLLMPagedMemLayerwiseGPUConnector,
+                    VLLMBufferLayerwiseGPUConnector,
+                ),
+            )
             mem_obj_consumer = self.gpu_connector.batched_to_gpu(starts, ends, **kwargs)
             next(mem_obj_consumer)
 
@@ -704,6 +715,9 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
 
         # synchronize the last layer
         next(mem_obj_consumer)
+        # if isinstance(self.gpu_connector,
+        #               VLLMBufferLayerwiseGPUConnector):
+        #    next(mem_obj_consumer)
 
         retrieved_tokens = torch.sum(ret_mask)
         self.stats_monitor.on_retrieve_finished(monitor_req_id, retrieved_tokens)
@@ -735,9 +749,13 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
 
         :return: An int indicating how many prefix tokens are cached.
         """
+
         end = 0
+        old_end = 0
         for start, end, key in self.token_database.process_tokens(tokens):
             assert isinstance(key, CacheEngineKey)
+
+            # import pdb; pdb.set_trace()
 
             # TODO(Jiayi): Optimize by checking only the existence of the key
             # of one layer
@@ -746,7 +764,8 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
                 if not self.storage_manager.contains(
                     key_single_layer, search_range, pin
                 ):
-                    return start
+                    return old_end
+            old_end = end
         return end
 
 

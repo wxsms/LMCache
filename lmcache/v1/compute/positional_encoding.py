@@ -202,4 +202,4 @@ def get_fused_rope(
         )
         return None
 
-    return reverse_rope
+    return fused_rope

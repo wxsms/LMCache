@@ -498,8 +498,8 @@ class LMCacheConnectorV1Impl:
                 # NOTE(Jiayi): Perform blending before layerwise prefix caching
                 if self.enable_blending:
                     self.blender.blend(
-                        tokens,
-                        token_mask,
+                        tokens[: request.load_spec.lmcache_cached_tokens],
+                        token_mask[: request.load_spec.lmcache_cached_tokens],
                         kvcaches=kvcaches,
                         slot_mapping=slot_mapping,
                     )
