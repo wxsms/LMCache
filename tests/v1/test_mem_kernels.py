@@ -435,12 +435,14 @@ def test_single_layer_kernel(num_tokens):
             kv_cache[layer_id][1],
             slot_mapping,
             True,
+            False,
         )
         lmc_ops.single_layer_kv_transfer(
             tmp_gpu_buffer,
             kv_cache_new[layer_id][0],
             kv_cache_new[layer_id][1],
             slot_mapping,
+            False,
             False,
         )
 
