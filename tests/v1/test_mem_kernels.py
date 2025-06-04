@@ -435,7 +435,7 @@ def test_single_layer_kernel(num_tokens):
             kv_cache[layer_id][1],
             slot_mapping,
             True,
-            False,
+            True,
         )
         lmc_ops.single_layer_kv_transfer(
             tmp_gpu_buffer,
@@ -443,7 +443,7 @@ def test_single_layer_kernel(num_tokens):
             kv_cache_new[layer_id][1],
             slot_mapping,
             False,
-            False,
+            True,
         )
 
     check_paged_kv_cache_equal(
