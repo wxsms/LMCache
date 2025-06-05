@@ -72,6 +72,7 @@ class LocalCPUBackend(StorageBackendInterface):
 
         self.stats_monitor = LMCStatsMonitor.GetOrCreate()
         self.usage = 0
+
         self.layerwise = config.use_layerwise
         self.enable_blending = config.enable_blending
 
