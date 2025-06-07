@@ -23,8 +23,7 @@ import torch
 @dataclass
 class LMCBlendCommonMetadata:
     """
-    Metadata for blending operations in LMCache.
-    This class holds the necessary information for blending computations.
+    CommonMetadata (fixed hyperparams) for blending operations in LMCache.
     """
 
     check_layers: List[int]
@@ -35,8 +34,7 @@ class LMCBlendCommonMetadata:
 @dataclass
 class LMCBlendMetadata:
     """
-    Metadata for blending operations in LMCache.
-    This class holds the necessary information for blending computations.
+    Metadata (determined during runtime) for blending operations in LMCache.
     """
 
     imp_indices: Optional[torch.Tensor] = None

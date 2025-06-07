@@ -754,8 +754,6 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
         for start, end, key in self.token_database.process_tokens(tokens):
             assert isinstance(key, CacheEngineKey)
 
-            # import pdb; pdb.set_trace()
-
             # TODO(Jiayi): Optimize by checking only the existence of the key
             # of one layer
             key_all_layers = key.split_layers(self.num_layers)
