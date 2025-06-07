@@ -53,6 +53,8 @@ class LMCacheEngineConfig:
     remote_url: Optional[str]
     remote_serde: Optional[str]  # Can be "naive" or "cachegen"
 
+    use_layerwise: bool  # whether to use layerwise pipelining
+
     save_decode_cache: bool  # whether to store decode kv cache
 
     # Blending related configurations
@@ -99,9 +101,11 @@ class LMCacheEngineConfig:
     # The url of the actual remote lmcache instance for auditing
     audit_actual_remote_url: Optional[str] = None
 
-    # (Optional) Weka/CuFile related configurations
     # The path under the WekaFS mount that the cache will be stored
     weka_path: Optional[str] = None
+    # (Optional) The path under the File-based backend cache will be stored
+    gds_path: Optional[str] = None
+    # (Optional) GDS/CuFile related configurations
     # Size of CuFile Buffer in MiB
     cufile_buffer_size: Optional[int] = None
 
@@ -117,6 +121,7 @@ class LMCacheEngineConfig:
         max_local_disk_size: int = 0,
         remote_url: Optional[str] = "lm://localhost:65432",
         remote_serde: Optional[str] = "naive",
+        use_layerwise: bool = False,
         save_decode_cache: bool = False,
         enable_blending: bool = False,
         blend_recompute_ratio: float = 0.15,
@@ -151,6 +156,7 @@ class LMCacheEngineConfig:
             max_local_disk_size,
             remote_url,
             remote_serde,
+            use_layerwise,
             save_decode_cache,
             enable_blending,
             blend_recompute_ratio,
@@ -183,6 +189,7 @@ class LMCacheEngineConfig:
         backend: str = "cpu",
         remote_url: Optional[str] = "lm://localhost:65432",
         remote_serde: str = "naive",
+        use_layerwise: bool = False,
         save_decode_cache: bool = False,
         enable_blending: bool = False,
         blend_recompute_ratio: float = 0.15,
@@ -242,6 +249,7 @@ class LMCacheEngineConfig:
                 max_local_disk_size,
                 remote_url,
                 remote_serde,
+                use_layerwise,
                 save_decode_cache,
                 enable_blending,
                 blend_recompute_ratio,
@@ -274,6 +282,8 @@ class LMCacheEngineConfig:
 
         remote_url = config.get("remote_url", None)
         remote_serde = config.get("remote_serde", "naive")
+
+        use_layerwise = config.get("use_layerwise", False)
 
         save_decode_cache = config.get("save_decode_cache", False)
 
@@ -327,6 +337,7 @@ class LMCacheEngineConfig:
         audit_actual_remote_url = config.get("audit_actual_remote_url", None)
 
         weka_path = config.get("weka_path", None)
+        gds_path = config.get("gds_path", None)
         cufile_buffer_size = config.get("cufile_buffer_size", None)
 
         local_disk_path = _parse_local_disk(local_disk)
@@ -348,6 +359,7 @@ class LMCacheEngineConfig:
                 max_local_disk_size,
                 remote_url,
                 remote_serde,
+                use_layerwise,
                 save_decode_cache,
                 enable_blending,
                 blend_recompute_ratio,
@@ -370,6 +382,7 @@ class LMCacheEngineConfig:
                 nixl_enable_gc,
                 audit_actual_remote_url,
                 weka_path,
+                gds_path,
                 cufile_buffer_size,
                 extra_config,
             )
@@ -438,6 +451,11 @@ class LMCacheEngineConfig:
         config.remote_serde = parse_env(
             get_env_name("remote_serde"), config.remote_serde
         )
+
+        config.use_layerwise = to_bool(
+            parse_env(get_env_name("use_layerwise"), config.use_layerwise)
+        )
+
         config.save_decode_cache = to_bool(
             parse_env(get_env_name("save_decode_cache"), config.save_decode_cache)
         )
@@ -537,6 +555,10 @@ class LMCacheEngineConfig:
             get_env_name("weka_path"),
             config.weka_path,
         )
+        config.gds_path = parse_env(
+            get_env_name("gds_path"),
+            config.gds_path,
+        )
         config.cufile_buffer_size = parse_env(
             get_env_name("cufile_buffer_size"),
             config.cufile_buffer_size,
@@ -602,6 +624,7 @@ class LMCacheEngineConfig:
             "max_local_disk_size": f"{self.max_local_disk_size} GB",
             "remote_url": self.remote_url,
             "remote_serde": self.remote_serde,
+            "use_layerwise": self.use_layerwise,
             "save_decode_cache": self.save_decode_cache,
             "enable_blending": self.enable_blending,
             "blend_recompute_ratio": self.blend_recompute_ratio,
@@ -620,6 +643,7 @@ class LMCacheEngineConfig:
             "nixl_buffer_device": self.nixl_buffer_device,
             "nixl_enable_gc": self.nixl_enable_gc,
             "weka_path": self.weka_path,
+            "gds_path": self.gds_path,
             "extra_config": self.extra_config,
         }
         logger.info(f"LMCache Configuration: {config_dict}")

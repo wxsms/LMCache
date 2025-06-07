@@ -73,6 +73,9 @@ class LocalCPUBackend(StorageBackendInterface):
         self.stats_monitor = LMCStatsMonitor.GetOrCreate()
         self.usage = 0
 
+        self.layerwise = config.use_layerwise
+        self.enable_blending = config.enable_blending
+
     def __str__(self):
         return self.__class__.__name__
 
@@ -205,7 +208,13 @@ class LocalCPUBackend(StorageBackendInterface):
         regardless of whether local_cpu is True or False
         """
         if fmt is None:
-            fmt = MemoryFormat.KV_2LTD
+            if self.layerwise:
+                if self.enable_blending:
+                    fmt = MemoryFormat.KV_2TD
+                else:
+                    fmt = MemoryFormat.KV_T2D
+            else:
+                fmt = MemoryFormat.KV_2LTD
 
         memory_obj = self.memory_allocator.allocate(shape, dtype, fmt)
         if memory_obj is not None or not eviction:

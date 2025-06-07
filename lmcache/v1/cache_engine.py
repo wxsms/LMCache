@@ -34,6 +34,7 @@ from lmcache.v1.distributed_server import (
 )
 from lmcache.v1.gpu_connector import (
     GPUConnectorInterface,
+    VLLMBufferLayerwiseGPUConnector,
     VLLMPagedMemLayerwiseGPUConnector,
 )
 from lmcache.v1.lookup_server import LookupServerInterface, RedisLookupServer
@@ -49,7 +50,11 @@ from lmcache.v1.storage_backend.storage_manager import (
     DistributedStorageManager,
     StorageManager,
 )
-from lmcache.v1.token_database import ChunkedTokenDatabase, TokenDatabase
+from lmcache.v1.token_database import (
+    ChunkedTokenDatabase,
+    SegmentTokenDatabase,
+    TokenDatabase,
+)
 
 logger = init_logger(__name__)
 
@@ -480,9 +485,18 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             token_database,
             layerwise_gpu_connector,
         )
-        assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+
+        assert isinstance(
+            self.gpu_connector,
+            (VLLMPagedMemLayerwiseGPUConnector, VLLMBufferLayerwiseGPUConnector),
+        )
 
         self.num_layers = metadata.kv_shape[0]
+
+        if config.enable_blending:
+            self.fmt = MemoryFormat.KV_2TD
+        else:
+            self.fmt = MemoryFormat.KV_T2D
 
     @_lmcache_nvtx_annotate
     @torch.inference_mode()
@@ -542,7 +556,7 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             no_space_left = False
             for layer_id in range(self.num_layers):
                 mem_obj_single_layer = self.storage_manager.allocate(
-                    kv_shape_single_layer, kv_dtype, fmt=MemoryFormat.KV_T2D
+                    kv_shape_single_layer, kv_dtype, fmt=self.fmt
                 )
 
                 if mem_obj_single_layer is None:
@@ -574,7 +588,11 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             memory_objs = [list(row) for row in zip(*memory_objs, strict=False)]
             keys = [list(row) for row in zip(*keys, strict=False)]
 
-            assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+            assert isinstance(
+                self.gpu_connector,
+                (VLLMPagedMemLayerwiseGPUConnector, VLLMBufferLayerwiseGPUConnector),
+            )
+
             mem_obj_generator = self.gpu_connector.batched_from_gpu(
                 memory_objs, starts, ends, **kwargs
             )
@@ -658,7 +676,13 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
 
             get_generator = self.storage_manager.layerwise_batched_get(keys_layer_major)
 
-            assert isinstance(self.gpu_connector, VLLMPagedMemLayerwiseGPUConnector)
+            assert isinstance(
+                self.gpu_connector,
+                (
+                    VLLMPagedMemLayerwiseGPUConnector,
+                    VLLMBufferLayerwiseGPUConnector,
+                ),
+            )
             mem_obj_consumer = self.gpu_connector.batched_to_gpu(starts, ends, **kwargs)
             next(mem_obj_consumer)
 
@@ -721,7 +745,9 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
 
         :return: An int indicating how many prefix tokens are cached.
         """
+
         end = 0
+        old_end = 0
         for start, end, key in self.token_database.process_tokens(tokens):
             assert isinstance(key, CacheEngineKey)
 
@@ -732,7 +758,8 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
                 if not self.storage_manager.contains(
                     key_single_layer, search_range, pin
                 ):
-                    return start
+                    return old_end
+            old_end = end
         return end
 
 
@@ -751,7 +778,7 @@ class LMCacheEngineBuilder:
             assert config.nixl_buffer_device is not None
             return AdHocMemoryAllocator(config.nixl_buffer_device)
 
-        if config.weka_path is not None:
+        if config.weka_path is not None or config.gds_path is not None:
             assert config.cufile_buffer_size is not None
             return CuFileMemoryAllocator(config.cufile_buffer_size * 1024**2)
 
@@ -763,6 +790,8 @@ class LMCacheEngineBuilder:
         config: LMCacheEngineConfig,
         metadata: LMCacheEngineMetadata,
     ) -> TokenDatabase:
+        if config.enable_blending:
+            return SegmentTokenDatabase(config, metadata)
         return ChunkedTokenDatabase(config, metadata)
 
     @classmethod
@@ -772,7 +801,6 @@ class LMCacheEngineBuilder:
         config: LMCacheEngineConfig,
         metadata: LMCacheEngineMetadata,
         gpu_connector: GPUConnectorInterface,
-        use_layerwise_engine: bool = False,
     ) -> LMCacheEngine:
         """
         Builds a new LMCacheEngine instance if it doesn't already exist for the
@@ -789,7 +817,7 @@ class LMCacheEngineBuilder:
 
             # HACK(Jiayi): Merge two types of engine into one in the future
             engine: Union[LayerwiseLMCacheEngine, LMCacheEngine]
-            if use_layerwise_engine:
+            if config.use_layerwise:
                 engine = LayerwiseLMCacheEngine(
                     config,
                     metadata,

@@ -79,6 +79,8 @@ def test_segment_token_database(prefix_length, chunk_lengths):
     query_bytes = query_tokens.cpu().to(torch.uint32).numpy().tobytes()
     query_hash = hashlib.sha256(query_bytes).hexdigest()
     hashes.append(query_hash)
+    starts.append(start)
+    ends.append(start + query_length)
 
     tokens = torch.cat([sys_tokens, *token_chunks, sep_tokens, query_tokens])
     total_length = len(tokens)

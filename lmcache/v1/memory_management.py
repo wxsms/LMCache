@@ -42,13 +42,17 @@ class MemoryFormat(Enum):
     """
     # LAYER_KV_BLOB = 2
     KV_T2D = 2
+    """[2, num_tokens, hidden_dim]
+    """
+
+    KV_2TD = 3
     """Compressed binary array format
     """
-    BINARY = 3
+    BINARY = 4
 
-    BINARY_BUFFER = 4
+    BINARY_BUFFER = 5
 
-    KV_MLA_FMT = 5
+    KV_MLA_FMT = 6
     """[1, num_layers, num_tokens, aligned_head_size]
     """
 
@@ -96,6 +100,9 @@ class MemoryObjMetadata:
 
     # The 'logical' format of the tensor
     fmt: MemoryFormat = MemoryFormat.UNDEFINED
+
+    # Positions when the cache is stored
+    cached_positions: Optional[torch.Tensor] = None
 
     def get_size(self):
         """
@@ -357,16 +364,6 @@ class TensorMemoryObj(MemoryObj):
     @property
     def is_pinned(self) -> bool:
         return self.metadata.is_pin
-
-
-# TODO(Jiayi): Need to make this compatible with pin/unpin semantics
-class CopyLessMemoryObj(TensorMemoryObj):
-    def __init__(self, raw_data, metadata, callback, parent_allocator=None):
-        super().__init__(raw_data, metadata, parent_allocator)
-        self.callback = callback
-
-    def __del__(self):
-        self.callback()
 
 
 class BytesBufferMemoryObj(MemoryObj):
@@ -837,6 +834,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             return self.buffer_allocator.allocate(shape, dtype, fmt)
         elif fmt in [
             MemoryFormat.KV_2LTD,
+            MemoryFormat.KV_2TD,
             MemoryFormat.KV_T2D,
             MemoryFormat.KV_MLA_FMT,
         ]:
@@ -859,6 +857,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             self.buffer_allocator.free(memory_obj)
         elif fmt in [
             MemoryFormat.KV_2LTD,
+            MemoryFormat.KV_2TD,
             MemoryFormat.KV_T2D,
             MemoryFormat.KV_MLA_FMT,
         ]:

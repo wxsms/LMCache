@@ -17,7 +17,6 @@ from copy import deepcopy
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 import dataclasses
-import os
 
 # Third Party
 from torch.nn.utils.rnn import pad_sequence
@@ -49,6 +48,7 @@ from lmcache.utils import _lmcache_nvtx_annotate
 from lmcache.v1.cache_engine import LMCacheEngine, LMCacheEngineBuilder
 from lmcache.v1.config import LMCacheEngineConfig
 from lmcache.v1.gpu_connector import (
+    VLLMBufferLayerwiseGPUConnector,
     VLLMPagedMemGPUConnectorMLA,
     VLLMPagedMemGPUConnectorV2,
     VLLMPagedMemLayerwiseGPUConnector,
@@ -179,12 +179,8 @@ def init_lmcache_engine(
         VLLMPagedMemGPUConnectorMLA,
     ]
 
-    # FIXME(Jiayi): support non-environ config
-    env_layerwise = os.getenv("LMCACHE_USE_LAYERWISE", "False")
-    use_layerwise = env_layerwise.lower() in ["true", "1"]
-
     if use_mla:
-        if use_layerwise:
+        if config.use_layerwise:
             raise ValueError("layerwise MLA connector is not supported yet")
         vllm_gpu_connector = VLLMPagedMemGPUConnectorMLA(
             head_size,
@@ -197,15 +193,26 @@ def init_lmcache_engine(
     else:
         hidden_dim_size = num_kv_head * head_size
 
-        if use_layerwise:
-            vllm_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
-                hidden_dim_size,
-                num_layer,
-                use_gpu=use_gpu,
-                chunk_size=chunk_size,
-                dtype=kv_dtype,
-                device=device,
-            )
+        if config.use_layerwise:
+            if config.enable_blending:
+                # Use layerwise connector for blending
+                vllm_gpu_connector = VLLMBufferLayerwiseGPUConnector(
+                    hidden_dim_size,
+                    num_layer,
+                    use_gpu=use_gpu,
+                    chunk_size=chunk_size,
+                    dtype=kv_dtype,
+                    device=device,
+                )
+            else:
+                vllm_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
+                    hidden_dim_size,
+                    num_layer,
+                    use_gpu=use_gpu,
+                    chunk_size=chunk_size,
+                    dtype=kv_dtype,
+                    device=device,
+                )
         else:
             vllm_gpu_connector = VLLMPagedMemGPUConnectorV2(
                 hidden_dim_size,
@@ -216,7 +223,7 @@ def init_lmcache_engine(
                 device=device,
             )
     engine = LMCacheEngineBuilder.get_or_create(
-        ENGINE_NAME, config, metadata, vllm_gpu_connector, use_layerwise
+        ENGINE_NAME, config, metadata, vllm_gpu_connector
     )
 
     return engine
