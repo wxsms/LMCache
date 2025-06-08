@@ -879,6 +879,7 @@ class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
         for start, end in zip(starts, ends, strict=False):
             slot_mapping_chunks.append(slot_mapping[start:end])
 
+        # TODO(Jiayi): Optimize away this `cat`
         slot_mapping_full = torch.cat(slot_mapping_chunks, dim=0)
 
         num_tokens = len(slot_mapping_full)
