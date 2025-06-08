@@ -136,8 +136,8 @@ class StorageManager:
         assert isinstance(self.local_cpu_backend, LocalCPUBackend)
         # TODO (Jiayi): We might need to pre-allocate and management
         # disk in a similar way as CPU.
-        return self.local_cpu_backend.allocate(
-            shape, dtype, fmt, batch_size, eviction=eviction
+        return self.local_cpu_backend.batched_allocate(
+            shape, dtype, batch_size, fmt, eviction=eviction
         )
 
     def dry_allocate(

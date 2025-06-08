@@ -556,35 +556,19 @@ class LayerwiseLMCacheEngine(LMCacheEngine):
             num_tokens = end - start
             kv_shape_single_layer = self.gpu_connector.get_shape(num_tokens)
 
-            # TODO(Jiayi): Optimize with batched allocation
-            # memory_objs_multi_layer: List[MemoryObj] = []
-            # no_space_left = False
-            # for layer_id in range(self.num_layers):
-            #    mem_obj_single_layer = self.storage_manager.allocate(
-            #        kv_shape_single_layer, kv_dtype, fmt=self.fmt
-            #    )
-
-            #    if mem_obj_single_layer is None:
-            #        logger.warning(
-            #            "Failed to allocate memory for the KV cache.\n"
-            #            "The KV cache will not be stored."
-            #        )
-            #        no_space_left = True
-            #        for mem_obj_prev_layer in memory_objs_multi_layer:
-            #            mem_obj_prev_layer.ref_count_down()
-            #        break
-            #
-            #    memory_objs_multi_layer.append(mem_obj_single_layer)
-
-            # if no_space_left:
-            #
-
             memory_objs_multi_layer = self.storage_manager.batched_allocate(
                 kv_shape_single_layer,
                 kv_dtype,
                 batch_size=self.num_layers,
                 fmt=self.fmt,
             )
+
+            if memory_objs_multi_layer is None:
+                logger.warning(
+                    "Failed to allocate memory for the KV cache.\n"
+                    "The KV cache will not be stored."
+                )
+                break
 
             starts.append(start)
             ends.append(end)

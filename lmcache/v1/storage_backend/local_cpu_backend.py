@@ -175,12 +175,13 @@ class LocalCPUBackend(StorageBackendInterface):
             memory_obj.unpin()
             return True
 
-    def remove(self, key: CacheEngineKey) -> bool:
+    def remove(self, key: CacheEngineKey, free_obj=True) -> bool:
         with self.cpu_lock:
             if key not in self.hot_cache:
                 return False
             memory_obj = self.hot_cache.pop(key)
-            memory_obj.ref_count_down()
+            if free_obj:
+                memory_obj.ref_count_down()
 
             self.usage -= memory_obj.get_size()
             self.stats_monitor.update_local_cache_usage(self.usage)
@@ -280,35 +281,43 @@ class LocalCPUBackend(StorageBackendInterface):
         # Setting it to small will cause more eviction overhead.
         # Setting it to large might result in lower cache hit
         # because more caches are evicted.
-        blocks_to_free = batch_size
+        # blocks_to_free = batch_size
 
         evict_keys = []
         old_mem_objs = []
         with self.cpu_lock:
             for evict_key in self.hot_cache:
+                if evict_key in evict_keys:
+                    continue
                 old_mem_obj = self.hot_cache[evict_key]
                 # If the ref_count > 1, we cannot evict it as the cpu memory
                 # might be used as buffers by other storage backends
-                if old_mem_obj.get_ref_count() > 1:
+                if old_mem_obj.get_ref_count() > 1 and not old_mem_obj.is_pinned:
                     continue
-                evict_keys.append(evict_key)
-                old_mem_objs.append(old_mem_obj)
+                # HACK: We assume batch_size=num_layers here.
+                # We also assume if the one layer's ref_count > 1 or pinned,
+                # then the other layers are also ref_count > 1 or
+                # pinned in the cpu memory.
+                evict_key_all_layer = evict_key.split_layers(batch_size)
+                evict_keys.extend(evict_key_all_layer)
+                for key in evict_key_all_layer:
+                    old_mem_objs.append(self.hot_cache[key])
 
-                if len(old_mem_objs) < blocks_to_free:
-                    continue
+                # if len(old_mem_objs) < blocks_to_free:
+                #    continue
 
                 self.memory_allocator.batched_free(old_mem_objs)
                 memory_objs = self.memory_allocator.batched_allocate(
                     shape, dtype, batch_size, fmt
                 )
 
-                logger.debug(f"Evicting {blocks_to_free} chunks from cpu memory")
+                logger.debug(f"Evicting {len(old_mem_objs)} chunks from cpu memory")
 
                 if memory_objs is not None:
                     break
                 old_mem_objs = []
         for evict_key in evict_keys:
-            self.remove(evict_key)
+            self.remove(evict_key, free_obj=False)
         if self.lookup_server is not None:
             self.lookup_server.batched_remove(evict_keys)
         return memory_objs

@@ -782,7 +782,7 @@ class TensorMemoryAllocator(MemoryAllocatorInterface):
 
         new_free_block = None
         curr_start = memory_objs[0].meta.address
-        new_free_bloks = []
+        new_free_blocks = []
         num_valid_blocks = 0
         total_freed_size = 0
         for memory_obj in memory_objs:
@@ -803,13 +803,14 @@ class TensorMemoryAllocator(MemoryAllocatorInterface):
                 new_free_block.size += memory_obj.meta.phy_size
                 curr_start += memory_obj.meta.phy_size
             else:
-                new_free_bloks.append(new_free_block)
+                new_free_blocks.append(new_free_block)
                 new_free_block = FreeBlock(
                     start=memory_obj.meta.address, size=memory_obj.meta.phy_size
                 )
                 curr_start = memory_obj.meta.address + memory_obj.meta.phy_size
+        new_free_blocks.append(new_free_block)
 
-        for new_free_block in new_free_bloks:
+        for new_free_block in new_free_blocks:
             index = self.explicit_list.bisect_right(new_free_block)
             prev_block = self.explicit_list[index - 1] if index > 0 else None
             succ_block = (
