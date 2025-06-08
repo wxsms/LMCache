@@ -249,6 +249,7 @@ def test_layerwise_vllm_paged_connector_with_gpu(use_gpu):
         ends,
         kvcaches=gpu_kv_src,
         slot_mapping=slot_mapping,
+        sync=True,
     )
 
     for layer_id in range(num_layers + 1):
