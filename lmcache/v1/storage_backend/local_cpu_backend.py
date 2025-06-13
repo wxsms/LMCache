@@ -117,12 +117,12 @@ class LocalCPUBackend(StorageBackendInterface):
                     KVAdmitMsg(self.instance_id, key.worker_id, key.chunk_hash, "cpu")
                 )
         return None
-    
+
     def batched_submit_put_task(
         self,
         keys: List[CacheEngineKey],
         memory_objs: List[MemoryObj],
-    ) -> Optional[Future]:
+    ) -> Optional[List[Future]]:
         """
         Synchronously put the MemoryObjs into the local cpu backend.
         """
@@ -130,9 +130,9 @@ class LocalCPUBackend(StorageBackendInterface):
             return None
 
         # TODO(Jiayi): optimize this with batching
-        for key, memory_obj in zip(keys, memory_objs):
+        for key, memory_obj in zip(keys, memory_objs, strict=False):
             self.submit_put_task(key, memory_obj)
-        
+
         return None
 
     # NOTE (Jiayi): prefetch might be deprecated in the future.
