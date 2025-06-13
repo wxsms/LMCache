@@ -16,7 +16,7 @@
 # Standard
 from collections import OrderedDict
 from concurrent.futures import Future
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import asyncio
 import ctypes
 import json
@@ -360,6 +360,14 @@ class GdsBackend(StorageBackendInterface):
             self._async_save_bytes_to_disk(key, memory_obj), self.loop
         )
         return future
+
+    def batched_submit_put_task(
+        self, keys: List[CacheEngineKey], memory_objs: List[MemoryObj]
+    ) -> Optional[List[Future]]:
+        return [
+            self.submit_put_task(key, memory_obj)
+            for key, memory_obj in zip(keys, memory_objs, strict=False)
+        ]
 
     async def _async_save_bytes_to_disk(
         self,

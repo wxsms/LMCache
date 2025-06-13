@@ -40,7 +40,6 @@ from lmcache.v1.memory_management import (
     MemoryAllocatorInterface,
     MemoryFormat,
     MemoryObj,
-    MemoryObjMetadata,
 )
 from lmcache.v1.storage_backend import CreateStorageBackends
 from lmcache.v1.storage_backend.abstract_backend import StorageBackendInterface
@@ -73,6 +72,13 @@ class StorageManager:
         self.thread = threading.Thread(target=self.loop.run_forever)
         self.thread.start()
 
+        # FIXME: # lazy import because nixl cannot be installed on some machines
+        # First Party
+        from lmcache.v1.storage_backend.nixl_backend import NixlBackend
+
+        self.storage_backend = NixlBackend.CreateNixlBackend(config, metadata)
+        assert config.nixl_buffer_device is not None
+
         # TODO: remove hardcode
         dst_device = "cuda"
         self.storage_backends: OrderedDict[str, StorageBackendInterface] = (
@@ -86,6 +92,7 @@ class StorageManager:
                 lookup_server,
             )
         )
+        # FIXME (Jiayi): need to change this
         self.local_cpu_backend = self.storage_backends["LocalCPUBackend"]
         self.prefetch_tasks: Dict[CacheEngineKey, Future] = {}
         self.put_tasks: Dict[str, Dict[CacheEngineKey, Tuple[Future, MemoryObj]]] = {}
@@ -140,18 +147,6 @@ class StorageManager:
             shape, dtype, batch_size, fmt, eviction=eviction
         )
 
-    def dry_allocate(
-        self,
-        shape: torch.Size,
-        dtype: torch.dtype,
-        eviction=True,
-    ) -> Optional[MemoryObjMetadata]:
-        """
-        Dry allocate memory object with memory allocator.
-        Use LRU evictor if eviction is enabled.
-        """
-        return self.memory_allocator.dry_allocate(shape, dtype)
-
     # FIXME: Should be deprecated
     def put(
         self,
@@ -193,18 +188,18 @@ class StorageManager:
 
         A default implementation using "put"
         """
-        
+
         # TODO(Jiayi): currently, the cache is stored to a certain
         # backend if this backend does not have this cache.
         # There's no way to configure a global caching policy
-        # among different strorage backends.
+        # among different storage backends.
         for backend in self.storage_backends.items():
+            # NOTE: the handling of exists_in_put_tasks
+            # is done in the backend
             backend.batched_submit_put_task(keys, memory_objs)
-        
+
         for memory_obj in memory_objs:
             memory_obj.ref_count_down()
-            
-
 
     def get(self, key: CacheEngineKey) -> Optional[MemoryObj]:
         """
@@ -461,132 +456,3 @@ class StorageManager:
             self.thread.join()
 
         logger.info("Storage manager closed.")
-
-
-class DistributedStorageManager:
-    """
-    The storage manager for P-D disaggregation setting
-
-    Key primitives:
-    - allocate(): allocate the memory object when 'store'
-    - put(): put the memory object into the storage backend
-    - batched_put(): put multiple memory objects into the storage backend
-    - get(): get the memory object from the storage backend
-    - prefetch(): NotImplemented (TODO)
-    - contains(): check if the key exists in the storage backend
-    - close(): close the storage manager
-    """
-
-    def __init__(
-        self,
-        config: LMCacheEngineConfig,
-        metadata: LMCacheEngineMetadata,
-        allocator: MemoryAllocatorInterface,
-    ):
-        # lazy import because nixl cannot be installed on some machines
-        # First Party
-        from lmcache.v1.storage_backend.nixl_backend import NixlBackend
-
-        self.storage_backend = NixlBackend.CreateNixlBackend(config, metadata)
-        assert config.nixl_buffer_device is not None
-
-        # TODO, HACK: we are not using the AdHocMemoryAllocator or other passed
-        # allocators. Instead, we are using the NixlBackend's allocator for
-        # zero-copy allocatations
-        # self.allocator = allocator
-
-    @_lmcache_nvtx_annotate
-    def allocate(
-        self,
-        shape: torch.Size,
-        dtype: torch.dtype,
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-        eviction=True,
-    ) -> Optional[MemoryObj]:
-        """
-        Allocate memory object with memory allocator.
-        Use LRU evictor if eviction is enabled.
-        """
-        return self.storage_backend.allocate_zero_copy_write_object(shape, dtype, fmt)
-
-    def dry_allocate(
-        self,
-        shape: torch.Size,
-        dtype: torch.dtype,
-        eviction=True,
-    ) -> Optional[MemoryObjMetadata]:
-        """
-        Allocate memory object with memory allocator.
-        Use LRU evictor if eviction is enabled.
-        """
-        return self.storage_backend.get_underlying_allocator().dry_allocate(
-            shape, dtype
-        )
-
-    def prepare_put(
-        self,
-        keys: list[CacheEngineKey],
-        metadatas: list[MemoryObjMetadata],
-    ) -> None:
-        self.storage_backend.register_put_tasks(keys, metadatas)
-
-    def put(
-        self,
-        key: CacheEngineKey,
-        memory_obj: MemoryObj,
-    ) -> None:
-        # NOTE: For zero-copy, we should not use put anymore
-        raise NotImplementedError
-
-    def batched_put(
-        self,
-        keys: Sequence[CacheEngineKey],
-        memory_objs: List[MemoryObj],
-    ) -> None:
-        raise NotImplementedError
-
-    @_lmcache_nvtx_annotate
-    def commit_put(self):
-        self.storage_backend.flush_put_tasks()
-
-    def get(
-        self,
-        key: CacheEngineKey,
-    ) -> Optional[MemoryObj]:
-        obj = self.storage_backend.get_blocking(key)
-        return obj
-
-    def layerwise_batched_get(
-        self,
-        keys: Sequence[Sequence[CacheEngineKey]],
-    ) -> Generator[List[Future], None, None]:
-        raise NotImplementedError
-
-    def batched_unpin(
-        self,
-        keys: Sequence[CacheEngineKey],
-        locations: Optional[List[str]] = None,
-    ) -> None:
-        raise NotImplementedError
-
-    def remove(
-        self,
-        key: CacheEngineKey,
-    ) -> None:
-        self.storage_backend.remove(key)
-
-    def prefetch(self, key: CacheEngineKey) -> None:
-        raise NotImplementedError(
-            "Prefetch is not implemented for distributed storage manager."
-        )
-
-    def contains(
-        self,
-        key: CacheEngineKey,
-        search_range: Optional[List[str]] = None,
-        pin: bool = False,
-    ) -> bool:
-        return self.storage_backend.contains(key)
-
-    def close(self):
-        self.storage_backend.close()

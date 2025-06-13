@@ -493,19 +493,6 @@ class MemoryAllocatorInterface(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def dry_allocate(
-        self, shape: torch.Size, dtype: Optional[torch.dtype]
-    ) -> MemoryObjMetadata:
-        """
-        A 'dry run' allocation that returns the metadata of the
-        allocated memory without actually allocating it.
-
-        :param torch.Size shape: The shape of the tensor to allocate.
-        :param torch.dtype dtype: The dtype of the tensor to allocate.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
     def free(self, memory_obj: MemoryObj):
         """
         Frees the memory allocated for the given MemoryObj.
@@ -733,18 +720,6 @@ class TensorMemoryAllocator(MemoryAllocatorInterface):
 
         return tensor_mem_objs
 
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        """
-        A 'dry run' allocation that returns the metadata of the
-        allocated memory without actually allocating it.
-        """
-        raise NotImplementedError
-
     @_lmcache_nvtx_annotate
     def free(self, memory_obj: MemoryObj):
         if not memory_obj.is_valid():
@@ -897,23 +872,6 @@ class BufferAllocator(MemoryAllocatorInterface):
         byte_arrays = [bytearray(n) for _ in range(batch_size)]
         return [BytesBufferMemoryObj(byte_array) for byte_array in byte_arrays]
 
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.BINARY_BUFFER,
-    ) -> MemoryObjMetadata:
-        n = shape[0]
-        return MemoryObjMetadata(
-            shape=torch.Size([n, 0, 0, 0]),
-            dtype=None,
-            address=0,
-            phy_size=0,
-            ref_count=1,
-            is_pin=False,
-            fmt=MemoryFormat.BINARY_BUFFER,
-        )
-
     def free(self, memory_obj: MemoryObj):
         return
 
@@ -971,15 +929,6 @@ class HostMemoryAllocator(MemoryAllocatorInterface):
         with self.host_mem_lock:
             return self.allocator.memcheck()
 
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        with self.host_mem_lock:
-            return self.allocator.dry_allocate(shape, dtype, fmt)
-
 
 class PinMemoryAllocator(MemoryAllocatorInterface):
     """Allocates memory in the pre-allocated pinned memory."""
@@ -1028,15 +977,6 @@ class PinMemoryAllocator(MemoryAllocatorInterface):
     def memcheck(self):
         with self.host_mem_lock:
             return self.allocator.memcheck()
-
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        with self.host_mem_lock:
-            return self.allocator.dry_allocate(shape, dtype, fmt)
 
 
 class MixedMemoryAllocator(MemoryAllocatorInterface):
@@ -1098,14 +1038,6 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
                 )
         else:
             raise ValueError(f"Unsupported memory format: {fmt}")
-
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        raise NotImplementedError
 
     @_lmcache_nvtx_annotate
     def free(self, memory_obj: MemoryObj):
@@ -1194,14 +1126,6 @@ class GPUMemoryAllocator(MemoryAllocatorInterface):
         with self.device_mem_lock:
             return self.allocator.memcheck()
 
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        return self.allocator.dry_allocate(shape, dtype, fmt)
-
 
 class AdHocMemoryAllocator(MemoryAllocatorInterface):
     """
@@ -1255,30 +1179,6 @@ class AdHocMemoryAllocator(MemoryAllocatorInterface):
     ) -> Optional[List[MemoryObj]]:
         raise NotImplementedError(
             "Batched allocation is not supported in AdHocMemoryAllocator"
-        )
-
-    def dry_allocate(
-        self,
-        shape: Union[torch.Size, Tuple[int, ...]],
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        """
-        Returns a dummy MemoryObjMetadata for testing purposes.
-        """
-        if not isinstance(shape, torch.Size):
-            shape = torch.Size(shape)
-
-        assert dtype is not None, "dtype must be specified"
-
-        return MemoryObjMetadata(
-            shape=shape,
-            dtype=dtype,
-            address=0,
-            phy_size=0,
-            ref_count=1,
-            is_pin=False,
-            fmt=fmt,
         )
 
     def free(self, memory_obj: MemoryObj):

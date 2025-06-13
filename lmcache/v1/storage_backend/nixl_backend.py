@@ -14,7 +14,7 @@
 
 # Standard
 from concurrent.futures import Future
-from typing import Optional
+from typing import List, Optional
 import threading
 import time
 
@@ -309,7 +309,8 @@ class NixlBackend(StorageBackendInterface):
         self._registered_metadatas = metadatas
         self._nixl_channel.prepare_send(keys=keys, metadatas=metadatas)
 
-    def allocate_zero_copy_write_object(
+    # def allocate_zero_copy_write_object(
+    def allocate(
         self,
         shape: torch.Size,
         dtype: Optional[torch.dtype],
@@ -357,20 +358,13 @@ class NixlBackend(StorageBackendInterface):
         self._registered_metadatas = []
         self._num_payload_added = 0
 
-    def submit_put_task(self, key: CacheEngineKey, obj: MemoryObj) -> Optional[Future]:
-        """
-        Put the MemoryObj into the storage backend and send it to the receiver
-        in a blocking way.
-
-        :param key: The key of the MemoryObj.
-        :param obj: The MemoryObj to be stored.
-
-        :return: a future object
-
-        :note: Right now, the 'key' is not used and it assumes that the memory
-        object has the same order as the keys passed in `register_put_tasks`.
-        """
-        raise NotImplementedError
+    def batched_submit_put_task(
+        self, keys: List[CacheEngineKey], memory_objs: List[MemoryObj]
+    ) -> Optional[List[Future]]:
+        memory_objs_metadatas = [memory_obj.meta for memory_obj in memory_objs]
+        self.register_put_tasks(keys, memory_objs_metadatas)
+        self.flush_put_tasks()
+        return None
 
     def submit_prefetch_task(self, key: CacheEngineKey) -> Optional[Future]:
         """

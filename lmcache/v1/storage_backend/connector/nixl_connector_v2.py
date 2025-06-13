@@ -41,6 +41,7 @@ from lmcache.v1.storage_backend.connector.nixl_utils import NixlConfig, NixlRole
 logger = init_logger(__name__)
 
 
+# TODO(Jiayi): Make this part of memory_management.py
 class NixlBufferAllocator(MemoryAllocatorInterface):
     """The memory allocator on NIXL transfer buffer."""
 
@@ -73,8 +74,15 @@ class NixlBufferAllocator(MemoryAllocatorInterface):
 
         :rtype: Optional[MemoryObj]
         """
-        metadata = self.dry_allocate(torch.Size(shape), dtype, fmt)
-        metadata.address = self.allocated_size
+
+        metadata = MemoryObjMetadata(
+            shape=shape,
+            dtype=dtype,
+            address=self.allocated_size,
+            phy_size=0,
+            ref_count=1,
+            fmt=fmt,
+        )
 
         # check the size and capacity
         required_size = metadata.get_size()
@@ -106,22 +114,6 @@ class NixlBufferAllocator(MemoryAllocatorInterface):
         raise NotImplementedError(
             "Batched allocation is not supported in NIXL buffer allocator"
         )
-
-    def dry_allocate(
-        self,
-        shape: torch.Size,
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        """Dry allocate the memory and return the metadata.
-
-        Note: `address` is not valid in the dry allocation.
-        """
-        metadata = MemoryObjMetadata(
-            shape, dtype, address=0, phy_size=0, ref_count=1, fmt=fmt
-        )
-        metadata.phy_size = metadata.get_size()
-        return metadata
 
     def free(self, obj: MemoryObj):
         """Free the memory object."""
@@ -536,15 +528,6 @@ class NixlSender:
         """Get the underlying allocator for the NIXL pipe"""
         return self._pipe.get_allocator()
 
-    def dry_allocate(
-        self,
-        shape: torch.Size,
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        """Dry allocate the memory and return the metadata."""
-        return self._pipe._allocator.dry_allocate(shape, dtype, fmt)
-
     def prepare_send(
         self, keys: list[CacheEngineKey], metadatas: list[MemoryObjMetadata]
     ):
@@ -894,16 +877,6 @@ class NixlChannel:
         """Get the underlying allocator for the NIXL pipe"""
         sender = self._check_sender()
         return sender.get_allocator()
-
-    def dry_allocate(
-        self,
-        shape: torch.Size,
-        dtype: Optional[torch.dtype],
-        fmt: MemoryFormat = MemoryFormat.KV_2LTD,
-    ) -> MemoryObjMetadata:
-        """Dry allocate the memory and return the metadata."""
-        sender = self._check_sender()
-        return sender.dry_allocate(shape, dtype, fmt)
 
     def prepare_send(
         self, keys: list[CacheEngineKey], metadatas: list[MemoryObjMetadata]
