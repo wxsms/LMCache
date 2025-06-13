@@ -152,6 +152,7 @@ class StorageManager:
         """
         return self.memory_allocator.dry_allocate(shape, dtype)
 
+    # FIXME: Should be deprecated
     def put(
         self,
         key: CacheEngineKey,
@@ -175,10 +176,7 @@ class StorageManager:
 
         # ever_put = False
         for backend_name, backend in self.storage_backends.items():
-            put_task = backend.submit_put_task(key, memory_obj)
-
-            if put_task is None:
-                continue
+            backend.submit_put_task(key, memory_obj)
 
         memory_obj.ref_count_down()
 
@@ -187,6 +185,7 @@ class StorageManager:
         keys: Sequence[CacheEngineKey],
         memory_objs: List[MemoryObj],
     ) -> None:
+        # FIXME(Jiayi): fix docstring
         """
         Non-blocking function to put the memory objects into the storages.
         Do not store if the same object is being stored (handled here by
@@ -194,8 +193,18 @@ class StorageManager:
 
         A default implementation using "put"
         """
-        for key, obj in zip(keys, memory_objs, strict=False):
-            self.put(key, obj)
+        
+        # TODO(Jiayi): currently, the cache is stored to a certain
+        # backend if this backend does not have this cache.
+        # There's no way to configure a global caching policy
+        # among different strorage backends.
+        for backend in self.storage_backends.items():
+            backend.batched_submit_put_task(keys, memory_objs)
+        
+        for memory_obj in memory_objs:
+            memory_obj.ref_count_down()
+            
+
 
     def get(self, key: CacheEngineKey) -> Optional[MemoryObj]:
         """

@@ -99,8 +99,6 @@ class LocalCPUBackend(StorageBackendInterface):
         """
         Synchronously put the MemoryObj into the local cpu backend.
         """
-        if not self.use_hot:
-            return None
 
         with self.cpu_lock:
             if key in self.hot_cache:
@@ -112,11 +110,29 @@ class LocalCPUBackend(StorageBackendInterface):
             self.usage += memory_obj.get_size()
             self.stats_monitor.update_local_cache_usage(self.usage)
 
+            # TODO(Jiayi): optimize this with batching?
             # push kv admit msg
             if self.lmcache_worker is not None:
                 self.lmcache_worker.put_msg(
                     KVAdmitMsg(self.instance_id, key.worker_id, key.chunk_hash, "cpu")
                 )
+        return None
+    
+    def batched_submit_put_task(
+        self,
+        keys: List[CacheEngineKey],
+        memory_objs: List[MemoryObj],
+    ) -> Optional[Future]:
+        """
+        Synchronously put the MemoryObjs into the local cpu backend.
+        """
+        if not self.use_hot:
+            return None
+
+        # TODO(Jiayi): optimize this with batching
+        for key, memory_obj in zip(keys, memory_objs):
+            self.submit_put_task(key, memory_obj)
+        
         return None
 
     # NOTE (Jiayi): prefetch might be deprecated in the future.

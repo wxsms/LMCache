@@ -252,9 +252,9 @@ class LMCacheEngine:
             multiple of the chunk size.
         """
         # FIXME(ApostaC): A HACK for distributed storage manager
-        if self.use_distributed_storage_manager:
-            self.store_distributed(tokens, mask, **kwargs)
-            return
+        # if self.use_distributed_storage_manager:
+        #    self.store_distributed(tokens, mask, **kwargs)
+        #    return
 
         if mask is not None:
             num_stored_tokens = torch.sum(mask).item()
@@ -262,6 +262,11 @@ class LMCacheEngine:
             num_stored_tokens = len(tokens)
         monitor_req_id = self.stats_monitor.on_store_request(num_stored_tokens)
 
+        starts = []
+        ends = []
+        keys = []
+        memory_objs = []
+        
         for start, end, key in self.token_database.process_tokens(tokens, mask):
             assert isinstance(key, CacheEngineKey)
             if self.storage_manager.contains(key):
@@ -277,14 +282,29 @@ class LMCacheEngine:
                     "The KV cache will not be stored."
                 )
                 break
+            
+            # FIXME(Jiayi): needs to have an assertion or force to let nixl
+            # use batched interface
+            # FIXME(Jiayi): Everything should be batched
+            if self.enable_batching:
+                starts.append(start)
+                ends.append(end)
+                keys.append(key)
+                memory_objs.append(memory_obj)
+            else:
+                self.gpu_connector.from_gpu(memory_obj, start, end, **kwargs)
+                self.storage_manager.put(key, memory_obj)
 
-            self.gpu_connector.from_gpu(memory_obj, start, end, **kwargs)
-            self.storage_manager.put(key, memory_obj)
+                # Update lookup server
+                if self.lookup_server is not None:
+                    self.lookup_server.insert(key)
 
-            # Update lookup server
-            if self.lookup_server is not None:
-                self.lookup_server.insert(key)
-
+        if self.enable_batching:
+            # FIXME(Jiayi): please do this
+            self.gpu_connector.batched_from_gpu(
+                memory_objs, starts, ends, **kwargs)
+            self.storage_manager.batched_put(keys, memory_objs)
+        
         self.stats_monitor.on_store_finished(monitor_req_id)
 
         logger.debug(f"Stored {num_stored_tokens} out of total {len(tokens)} tokens")
