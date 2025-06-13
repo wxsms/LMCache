@@ -548,7 +548,6 @@ class NixlSender:
 
         self._during_send = True
         self._prepared_count = len(keys)
-        self._added_payload_count = 0
 
     def allocate_for_send(
         self,
@@ -561,15 +560,6 @@ class NixlSender:
         If the buffer is full, it will trigger a flush and then allocate
         the memory from the beginning.
         """
-        if not self._during_send:
-            logger.error(
-                "Cannot add payload to a send transaction that is not prepared"
-            )
-            raise RuntimeError("No send transaction is prepared")
-
-        if self._added_payload_count >= self._prepared_count:
-            logger.error("Cannot add more payloads than prepared objects")
-            raise RuntimeError("Cannot add more payloads than prepared objects")
 
         self._added_payload_count += 1
         return self._pipe.allocate_for_write(shape, dtype, fmt)

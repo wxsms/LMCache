@@ -180,7 +180,7 @@ class StorageManager:
         # backend if this backend does not have this cache.
         # There's no way to configure a global caching policy
         # among different storage backends.
-        for backend in self.storage_backends.items():
+        for backend in self.storage_backends.values():
             # NOTE: the handling of exists_in_put_tasks
             # is done in the backend
             backend.batched_submit_put_task(keys, memory_objs)
@@ -214,7 +214,7 @@ class StorageManager:
             # NOTE(Jiayi): bypass the allocator for now
             memory_obj = backend.get_blocking(key)
             if memory_obj is not None:
-                if backend_name != "LocalCPUBackend":
+                if backend_name not in ["LocalCPUBackend", "NixlBackend"]:
                     local_cpu_backend = self.storage_backends["LocalCPUBackend"]
                     assert isinstance(local_cpu_backend, LocalCPUBackend)
                     local_cpu_backend.write_back(key, memory_obj)

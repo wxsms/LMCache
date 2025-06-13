@@ -45,10 +45,7 @@ from lmcache.v1.memory_management import (
     MemoryFormat,
     MixedMemoryAllocator,
 )
-from lmcache.v1.storage_backend.storage_manager import (
-    DistributedStorageManager,
-    StorageManager,
-)
+from lmcache.v1.storage_backend.storage_manager import StorageManager
 from lmcache.v1.token_database import (
     ChunkedTokenDatabase,
     SegmentTokenDatabase,
@@ -111,20 +108,16 @@ class LMCacheEngine:
         if self.config.enable_controller:
             self.lmcache_worker = LMCacheWorker(config, metadata, self)
 
-        self.use_distributed_storage_manager = False
-        if config.enable_nixl:
-            self.use_distributed_storage_manager = True
-            self.storage_manager = DistributedStorageManager(
-                config, metadata, self.memory_allocator
-            )
-        else:
-            self.storage_manager = StorageManager(
-                config,
-                metadata,
-                self.memory_allocator,
-                self.lmcache_worker,
-                self.lookup_server,
-            )  # type: ignore[assignment]
+        self.storage_manager = StorageManager(
+            config,
+            metadata,
+            self.memory_allocator,
+            self.lmcache_worker,
+            self.lookup_server,
+        )
+
+        # HACK: remove this in the future
+        self.remove_after_retrieve = config.enable_nixl
 
         if self.enable_p2p:
             self.distributed_loop = asyncio.get_event_loop()
@@ -294,14 +287,13 @@ class LMCacheEngine:
             self.gpu_connector.to_gpu(memory_obj, start, end, **kwargs)
             memory_obj.ref_count_down()
 
-            if isinstance(self.storage_manager, StorageManager):
-                self.storage_manager.batched_unpin([key])
-
             # NOTE (ApostaC): This is only for the current implementation:
             # When the object is retrieved back to vLLM, the storage backend
             # will immediately remove the object from itself
-            if isinstance(self.storage_manager, DistributedStorageManager):
+            if self.remove_after_retrieve:
                 self.storage_manager.remove(key)
+            else:
+                self.storage_manager.batched_unpin([key])
 
         retrieved_tokens = torch.sum(ret_mask)
         self.stats_monitor.on_retrieve_finished(monitor_req_id, retrieved_tokens)

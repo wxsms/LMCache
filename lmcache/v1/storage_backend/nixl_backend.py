@@ -141,7 +141,7 @@ class RecvObjPool:
             # DEBUG
             self.dbg_report()
 
-    def remove(self, key: CacheEngineKey):
+    def remove(self, key: CacheEngineKey) -> bool:
         with self.lock:
             if key in self._cnt:
                 self._cnt[key] -= 1
@@ -156,6 +156,7 @@ class RecvObjPool:
                     self._dbg_shallow_remove += 1
 
             self.dbg_report()
+            return True
 
     def contains(self, key: CacheEngineKey) -> bool:
         with self.lock:
@@ -309,32 +310,18 @@ class NixlBackend(StorageBackendInterface):
         self._registered_metadatas = metadatas
         self._nixl_channel.prepare_send(keys=keys, metadatas=metadatas)
 
-    # def allocate_zero_copy_write_object(
     def allocate(
         self,
         shape: torch.Size,
         dtype: Optional[torch.dtype],
         fmt: MemoryFormat = MemoryFormat.KV_2LTD,
+        eviction: bool = True,
     ) -> MemoryObj:
         """
         Allocate a zero-copy write object for the given shape and dtype.
 
         This will be seen as "adding a new payload" to the backend.
         """
-        assert self._registered_metadatas[self._num_payload_added].shape == shape, (
-            "The shape of the allocated object is not equal to the shape of "
-            "the registered metadata."
-        )
-
-        assert self._registered_metadatas[self._num_payload_added].dtype == dtype, (
-            "The dtype of the allocated object is not equal to the dtype of "
-            "the registered metadata."
-        )
-
-        assert self._registered_metadatas[self._num_payload_added].fmt == fmt, (
-            "The fmt of the allocated object is not equal to the fmt of "
-            "the registered metadata."
-        )
 
         self._num_payload_added += 1
 
@@ -392,12 +379,13 @@ class NixlBackend(StorageBackendInterface):
     ) -> Optional[Future]:
         raise NotImplementedError
 
-    def remove(self, key: CacheEngineKey) -> None:
+    def remove(self, key: CacheEngineKey) -> bool:
         """
         Remove the key from the storage backend.
 
         :param key: The key to remove.
         """
+        self._obj_pool.remove(key)
         return self._obj_pool.remove(key)
 
     def close(self) -> None:
