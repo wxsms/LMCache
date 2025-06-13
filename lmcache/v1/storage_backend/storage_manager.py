@@ -43,7 +43,6 @@ from lmcache.v1.memory_management import (
 from lmcache.v1.storage_backend import CreateStorageBackends
 from lmcache.v1.storage_backend.abstract_backend import StorageBackendInterface
 from lmcache.v1.storage_backend.local_cpu_backend import LocalCPUBackend
-from lmcache.v1.storage_backend.nixl_backend import NixlBackend
 
 if TYPE_CHECKING:
     # First Party
@@ -114,7 +113,6 @@ class StorageManager:
         Allocate memory object with memory allocator.
         Use LRU evictor if eviction is enabled.
         """
-        assert isinstance(self.allocator_backend, (LocalCPUBackend, NixlBackend))
         # TODO (Jiayi): We might need to pre-allocate and management
         # disk in a similar way as CPU.
         return self.allocator_backend.allocate(shape, dtype, fmt, eviction=eviction)
@@ -132,7 +130,6 @@ class StorageManager:
         Batched allocate memory object with memory allocator.
         Use LRU evictor if eviction is enabled.
         """
-        assert isinstance(self.local_cpu_backend, (LocalCPUBackend, NixlBackend))
         # TODO (Jiayi): We might need to pre-allocate and management
         # disk in a similar way as CPU.
         return self.allocator_backend.batched_allocate(
