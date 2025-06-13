@@ -22,7 +22,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
 )
 import asyncio
 import threading
@@ -44,6 +43,7 @@ from lmcache.v1.memory_management import (
 from lmcache.v1.storage_backend import CreateStorageBackends
 from lmcache.v1.storage_backend.abstract_backend import StorageBackendInterface
 from lmcache.v1.storage_backend.local_cpu_backend import LocalCPUBackend
+from lmcache.v1.storage_backend.nixl_backend import NixlBackend
 
 if TYPE_CHECKING:
     # First Party
@@ -66,21 +66,13 @@ class StorageManager:
         lmcache_worker: Optional["LMCacheWorker"] = None,
         lookup_server: Optional[LookupServerInterface] = None,
     ):
-        self.memory_allocator = allocator
-
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever)
         self.thread.start()
 
-        # FIXME: # lazy import because nixl cannot be installed on some machines
-        # First Party
-        from lmcache.v1.storage_backend.nixl_backend import NixlBackend
-
-        self.storage_backend = NixlBackend.CreateNixlBackend(config, metadata)
-        assert config.nixl_buffer_device is not None
-
-        # TODO: remove hardcode
         dst_device = "cuda"
+        # FIXME (Jiayi): The allocator is a dummy allocator in nixl for now.
+        # The real allocator is initialized inside the NixlBackend.
         self.storage_backends: OrderedDict[str, StorageBackendInterface] = (
             CreateStorageBackends(
                 config,
@@ -92,13 +84,13 @@ class StorageManager:
                 lookup_server,
             )
         )
-        # FIXME (Jiayi): need to change this
-        self.local_cpu_backend = self.storage_backends["LocalCPUBackend"]
-        self.prefetch_tasks: Dict[CacheEngineKey, Future] = {}
-        self.put_tasks: Dict[str, Dict[CacheEngineKey, Tuple[Future, MemoryObj]]] = {}
 
-        for backend_name in self.storage_backends.keys():
-            self.put_tasks[backend_name] = {}
+        if config.enable_nixl:
+            self.allocator_backend = self.storage_backends["NixlBackend"]
+        else:
+            self.allocator_backend = self.storage_backends["LocalCPUBackend"]
+
+        self.prefetch_tasks: Dict[CacheEngineKey, Future] = {}
 
         self.manager_lock = threading.Lock()
 
@@ -122,10 +114,10 @@ class StorageManager:
         Allocate memory object with memory allocator.
         Use LRU evictor if eviction is enabled.
         """
-        assert isinstance(self.local_cpu_backend, LocalCPUBackend)
+        assert isinstance(self.allocator_backend, (LocalCPUBackend, NixlBackend))
         # TODO (Jiayi): We might need to pre-allocate and management
         # disk in a similar way as CPU.
-        return self.local_cpu_backend.allocate(shape, dtype, fmt, eviction=eviction)
+        return self.allocator_backend.allocate(shape, dtype, fmt, eviction=eviction)
 
     @_lmcache_nvtx_annotate
     def batched_allocate(
@@ -140,10 +132,10 @@ class StorageManager:
         Batched allocate memory object with memory allocator.
         Use LRU evictor if eviction is enabled.
         """
-        assert isinstance(self.local_cpu_backend, LocalCPUBackend)
+        assert isinstance(self.local_cpu_backend, (LocalCPUBackend, NixlBackend))
         # TODO (Jiayi): We might need to pre-allocate and management
         # disk in a similar way as CPU.
-        return self.local_cpu_backend.batched_allocate(
+        return self.allocator_backend.batched_allocate(
             shape, dtype, batch_size, fmt, eviction=eviction
         )
 
@@ -169,7 +161,6 @@ class StorageManager:
                 memory_obj.ref_count_down()
                 return
 
-        # ever_put = False
         for backend_name, backend in self.storage_backends.items():
             backend.submit_put_task(key, memory_obj)
 
@@ -182,11 +173,10 @@ class StorageManager:
     ) -> None:
         # FIXME(Jiayi): fix docstring
         """
-        Non-blocking function to put the memory objects into the storages.
+        Non-blocking function to batched put the memory objects into the
+        storage backends.
         Do not store if the same object is being stored (handled here by
         storage manager) or has been stored (handled by storage backend).
-
-        A default implementation using "put"
         """
 
         # TODO(Jiayi): currently, the cache is stored to a certain
@@ -291,7 +281,7 @@ class StorageManager:
         kv_chunk = buffer_memory_obj.tensor
         kv_shape = kv_chunk.shape
         kv_dtype = kv_chunk.dtype
-        memory_obj = self.allocate(kv_shape, kv_dtype)
+        memory_obj = self.allocator_backend.allocate(kv_shape, kv_dtype)
         if memory_obj is None:
             logger.warning("Memory allocation failed in prefetch_callback")
             return
