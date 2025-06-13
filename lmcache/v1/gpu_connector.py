@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Standard
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 import abc
 
 # Third Party
@@ -61,6 +61,27 @@ class GPUConnectorInterface(metaclass=abc.ABCMeta):
         :param int start: The starting index of the data in the corresponding
             token sequence.
         :param int end: The ending index of the data in the corresponding
+            token sequence.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def batched_from_gpu(
+        self,
+        memory_objs: Union[List[List[MemoryObj]], List[MemoryObj]],
+        starts: List[int],
+        ends: List[int],
+        **kwargs,
+    ):
+        """
+        Batched load the data from a GPU memory into the memory objects.
+        Sub-classes should define the format of the kwargs.
+
+        :param Union[List[List[MemoryObj]], List[MemoryObj]] memory_obj:
+            The memory objects to store the data from GPU.
+        :param List[int] starts: The starting indices of the data in the corresponding
+            token sequence.
+        :param List[int] ends: The ending indices of the data in the corresponding
             token sequence.
         """
         raise NotImplementedError
@@ -165,6 +186,11 @@ class VLLMNestedTupleGPUConnector(GPUConnectorInterface):
                 )
         put_stream.synchronize()
 
+    # TODO(Jiayi): need to optimize
+    def batched_from_gpu(self, memory_objs, starts, ends, **kwargs):
+        for memory_obj, start, end in zip(memory_objs, starts, ends, strict=False):
+            self.from_gpu(memory_obj, start, end, **kwargs)
+
     def get_shape(self, num_tokens: int) -> torch.Size:
         return torch.Size([2, self.num_layers, num_tokens, self.hidden_dim_size])
 
@@ -256,6 +282,11 @@ class VLLMPagedMemGPUConnector(GPUConnectorInterface):
             )
 
         torch.cuda.synchronize()
+
+    # TODO(Jiayi): need to optimize
+    def batched_from_gpu(self, memory_objs, starts, ends, **kwargs):
+        for memory_obj, start, end in zip(memory_objs, starts, ends, strict=False):
+            self.from_gpu(memory_obj, start, end, **kwargs)
 
     def get_shape(self, num_tokens: int) -> torch.Size:
         return torch.Size([2, self.num_layers, num_tokens, self.hidden_dim_size])
@@ -360,28 +391,6 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
 
         kv_cache_pointers = self._initialize_pointers(kvcaches)
 
-        # NOTE(ApostaC): By default, detour from a GPU buffer is slower
-        # than directly copying from the CPU.
-        # So disabling it for now and use direct copy from CPU to GPU.
-
-        # if self.gpu_buffer is None or \
-        #        end - start != self.gpu_buffer.shape[2]:
-        #    lmc_ops.multi_layer_kv_transfer(memory_obj.tensor,
-        #                                    kv_cache_pointers,
-        #                                    slot_mapping[start:end],
-        #                                    kvcaches[0].device,
-        #                                    self.page_buffer_size, False)
-        # else:
-        #    # Memobj -> gpu_buffer -> kvcaches
-        #    assert self.gpu_buffer.device == kvcaches[0].device
-        #    tmp_gpu_buffer = self.gpu_buffer[:, :, :end-start, :]
-        #    tmp_gpu_buffer.copy_(memory_obj.tensor, non_blocking=True)
-        #    lmc_ops.multi_layer_kv_transfer(
-        #        tmp_gpu_buffer,
-        #        kv_cache_pointers,
-        #        slot_mapping[start:end],
-        #        kvcaches[0].device, self.page_buffer_size, False)
-
         lmc_ops.multi_layer_kv_transfer(
             memory_obj.tensor,
             kv_cache_pointers,
@@ -454,6 +463,11 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
             # NOTE: for better performance, we may not want to sync for every
             # memory object
             torch.cuda.synchronize()
+
+    # TODO(Jiayi): need to optimize to enable real batching
+    def batched_from_gpu(self, memory_objs, starts, ends, **kwargs):
+        for memory_obj, start, end in zip(memory_objs, starts, ends, strict=False):
+            self.from_gpu(memory_obj, start, end, **kwargs)
 
     def get_shape(self, num_tokens: int) -> torch.Size:
         return torch.Size([2, self.num_layers, num_tokens, self.hidden_dim_size])
@@ -672,7 +686,7 @@ class VLLMBufferLayerwiseGPUConnector(GPUConnectorInterface):
     @_lmcache_nvtx_annotate
     def batched_from_gpu(
         self,
-        memory_objs: List[List[MemoryObj]],
+        memory_objs: Union[List[List[MemoryObj]], List[MemoryObj]],
         starts: List[int],
         ends: List[int],
         **kwargs,
@@ -935,7 +949,7 @@ class VLLMPagedMemLayerwiseGPUConnector(GPUConnectorInterface):
     @_lmcache_nvtx_annotate
     def batched_from_gpu(
         self,
-        memory_objs: List[List[MemoryObj]],
+        memory_objs: Union[List[List[MemoryObj]], List[MemoryObj]],
         starts: List[int],
         ends: List[int],
         **kwargs,
