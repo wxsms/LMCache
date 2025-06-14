@@ -132,9 +132,9 @@ class LMCacheEngine:
                 )
             )
 
-        self.enable_layerwise = config.enable_layerwise
+        self.use_layerwise = config.use_layerwise
         self.num_layers = metadata.kv_shape[0]
-        if self.enable_layerwise:
+        if self.use_layerwise:
             if config.enable_blending:
                 self.fmt = MemoryFormat.KV_2TD
             else:
@@ -574,7 +574,7 @@ class LMCacheEngine:
         for start, end, key in self.token_database.process_tokens(tokens):
             assert isinstance(key, CacheEngineKey)
 
-            if self.enable_layerwise:
+            if self.use_layerwise:
                 # TODO(Jiayi): Optimize by checking only the existence of the key
                 # of one layer
                 key_all_layers = key.split_layers(self.num_layers)
