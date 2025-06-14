@@ -385,7 +385,6 @@ class NixlBackend(StorageBackendInterface):
 
         :param key: The key to remove.
         """
-        self._obj_pool.remove(key)
         return self._obj_pool.remove(key)
 
     def close(self) -> None:

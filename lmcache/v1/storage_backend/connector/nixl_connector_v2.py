@@ -87,8 +87,9 @@ class NixlBufferAllocator(MemoryAllocatorInterface):
         # check the size and capacity
         required_size = metadata.get_size()
         assert required_size + required_size < self.capacity, (
-            "The object size is larger than the NIXL buffer capacity"
+            "The object size is larger than the NIXL buffer capacity. "
             "Consider decreasing `max_batched_tokens` in vllm config"
+            "or increasing `nixl_buffer_size` in lmcache config."
         )
 
         if self.allocated_size + required_size > self.capacity:
