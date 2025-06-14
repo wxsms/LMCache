@@ -36,7 +36,7 @@ from lmcache.integration.vllm.utils import ENGINE_NAME, lmcache_get_config
 from lmcache.integration.vllm.vllm_adapter import init_lmcache_engine
 from lmcache.logging import init_logger
 from lmcache.utils import _lmcache_nvtx_annotate
-from lmcache.v1.cache_engine import LayerwiseLMCacheEngine, LMCacheEngine
+from lmcache.v1.cache_engine import LMCacheEngine
 from lmcache.v1.compute.blend import LMCBlenderBuilder
 
 if TYPE_CHECKING:
@@ -504,7 +504,6 @@ class LMCacheConnectorV1Impl:
                 token_mask = token_mask[: -self.skip_last_n_tokens]
 
             if self.use_layerwise:
-                assert isinstance(self.lmcache_engine, LayerwiseLMCacheEngine)
                 if idx == last_idx:
                     sync = True
                 else:
@@ -610,8 +609,6 @@ class LMCacheConnectorV1Impl:
         assert isinstance(connector_metadata, LMCacheConnectorMetadata)
 
         assert len(self.kv_caches) > 0
-
-        assert isinstance(self.lmcache_engine, LayerwiseLMCacheEngine)
 
         kvcaches = list(self.kv_caches.values())
         if self.current_layer == 0:
