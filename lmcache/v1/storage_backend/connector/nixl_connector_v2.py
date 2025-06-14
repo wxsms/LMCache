@@ -86,15 +86,17 @@ class NixlBufferAllocator(MemoryAllocatorInterface):
 
         # check the size and capacity
         required_size = metadata.get_size()
-        assert required_size + required_size < self.capacity, (
+        assert self.allocated_size + required_size <= self.capacity, (
             "The object size is larger than the NIXL buffer capacity. "
             "Consider decreasing `max_batched_tokens` in vllm config"
             "or increasing `nixl_buffer_size` in lmcache config."
         )
 
-        if self.allocated_size + required_size > self.capacity:
-            # If no enough space, try to flush
-            self._flush()
+        # NOTE: the following `flush` can be skipped for now
+        # due to the above assertion.
+        # if self.allocated_size + required_size > self.capacity:
+        # If no enough space, try to flush
+        #    self._flush()
 
         # allocate the memory
         raw_tensor = self.buffer[
