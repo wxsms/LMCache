@@ -205,8 +205,7 @@ class LMCacheEngine:
             ends.append(end)
             keys.append(key)
             memory_objs.append(memory_obj)
-
-            tot_kv_size = memory_obj.get_size()
+            tot_kv_size += memory_obj.get_size()
 
         self.gpu_connector.batched_from_gpu(memory_objs, starts, ends, **kwargs)
         offload_time += time.perf_counter() - t
