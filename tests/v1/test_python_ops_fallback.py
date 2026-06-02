@@ -3,6 +3,7 @@
 from typing import Any, Union
 import ctypes
 import os
+import time
 import unittest.mock
 
 # Third Party
@@ -10,6 +11,10 @@ import pytest
 import torch
 
 # First Party
+from lmcache.v1.multiprocess.native_completion import (
+    DeviceHostFuncDispatcher,
+    submit_callback_to_stream,
+)
 import lmcache.python_ops_fallback as _py_ops
 
 # ==========================================
@@ -1722,6 +1727,75 @@ def scenario_transfer_direction_enum(ops: Any, device: str) -> dict[str, torch.T
     }
 
 
+def scenario_record_drain_completion(ops: Any, device: str) -> dict[str, torch.Tensor]:
+    """Test record_completion_on_stream / drain_recorded_completions contracts.
+
+    Verified backend-agnostic: native c_ops uses cudaLaunchHostFunc on the
+    default stream (ptr=0), which fires synchronously after device_sync; the
+    fallback enqueues immediately. Both paths satisfy every assertion below.
+    """
+    ops.drain_recorded_completions()  # clear residual global state
+
+    assert ops.drain_recorded_completions() == []
+
+    ops.record_completion_on_stream(0, "kind-a", b"payload-a")
+    ops.record_completion_on_stream(0, "kind-b", b"payload-b")
+    device_sync(device)
+    result = ops.drain_recorded_completions()
+    assert result == [("kind-a", b"payload-a"), ("kind-b", b"payload-b")]
+    assert all(isinstance(k, str) and isinstance(p, bytes) for k, p in result)
+
+    assert ops.drain_recorded_completions() == []
+
+    # Multiple records on the default stream (ptr=0) must all enqueue.
+    # Note: ptr=0 is the only value safe on both backends — the fallback
+    # ignores the field, but the native path casts it to cudaStream_t, so
+    # arbitrary values like -1 / 2**32 would be invalid there.
+    for _ in range(3):
+        ops.record_completion_on_stream(0, "k", b"v")
+    device_sync(device)
+    assert len(ops.drain_recorded_completions()) == 3
+
+    return {"record_drain_completion": torch.tensor([1], dtype=torch.int32)}
+
+
+def scenario_dispatcher_integration(ops: Any, device: str) -> dict[str, torch.Tensor]:
+    """Test submit_callback_to_stream -> DeviceHostFuncDispatcher -> handler.
+
+    Works on all backends: submit_callback_to_stream only reads stream.ptr, so
+    _FakeStream(ptr=0) is accepted; the native path routes through the CUDA
+    default stream which fires before the dispatcher's drain loop polls.
+    """
+    # First Party
+    import lmcache.v1.multiprocess.native_completion as nc
+
+    original = nc._lmc_ops
+    nc._lmc_ops = ops
+    try:
+        ops.drain_recorded_completions()
+
+        class _FakeStream:
+            ptr: int = 0
+
+        dispatcher = DeviceHostFuncDispatcher(drain_interval_seconds=0.001)
+        received: list[list[bytes]] = []
+        dispatcher.register("finish_write", received.append, payload_type=list[bytes])
+        dispatcher.start()
+        try:
+            submit_callback_to_stream(_FakeStream(), "finish_write", [b"k0", b"k1"])
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and not received:
+                time.sleep(0.01)
+        finally:
+            dispatcher.stop()
+
+        assert received == [[b"k0", b"k1"]]
+    finally:
+        nc._lmc_ops = original
+
+    return {"dispatcher_integration": torch.tensor([1], dtype=torch.int32)}
+
+
 # ==========================================
 # 3. Registry
 # ==========================================
@@ -1746,6 +1820,8 @@ SCENARIO_REGISTRY = {
     "alloc_free_numa_ptr": scenario_alloc_free_numa_ptr,
     "alloc_free_shm_pinned_ptr": scenario_alloc_free_shm_pinned_ptr,
     "get_gpu_pci_bus_id": scenario_get_gpu_pci_bus_id,
+    "record_drain_completion": scenario_record_drain_completion,
+    "dispatcher_integration": scenario_dispatcher_integration,
 }
 
 
