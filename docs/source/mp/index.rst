@@ -53,6 +53,7 @@ LMCache ships two server entry points:
 
    quickstart
    configuration
+   hybrid_models
    l2_storage
    serde
    deployment
