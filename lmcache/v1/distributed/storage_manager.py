@@ -15,6 +15,7 @@ from lmcache.v1.distributed.api import (
     MemoryLayoutDesc,
     ObjectKey,
     PrefetchHandle,
+    TrimPolicy,
 )
 from lmcache.v1.distributed.config import StorageManagerConfig
 from lmcache.v1.distributed.error import L1Error, strerror
@@ -398,6 +399,7 @@ class StorageManager:
         layout_desc: MemoryLayoutDesc,
         extra_count: int = 0,
         external_request_id: str = "",
+        policy: TrimPolicy = TrimPolicy.PREFIX,
     ) -> PrefetchHandle:
         """Prefetch objects into L1 asynchronously.
 
@@ -409,6 +411,9 @@ class StorageManager:
                 key.  Total locks = 1 + extra_count.
             external_request_id: Request ID from the caller
                 for end-to-end log tracing.
+            policy: Which retained-subset policy to apply (see
+                :class:`TrimPolicy`).  ``PREFIX`` keeps the contiguous prefix;
+                ``SPARSE`` keeps every found key (gap-tolerant).
 
         Returns:
             PrefetchHandle to track the task.
@@ -417,6 +422,52 @@ class StorageManager:
         # objects are already in L1, and adding read locks to them.
 
         l1_read_result = self._l1_manager.reserve_read(keys, extra_count=extra_count)
+
+        if policy is TrimPolicy.SPARSE:
+            # SPARSE: retain a read lock on every L1 hit (not just the leading
+            # prefix) and send all L1 misses to L2 as one coalesced request.
+            # reserve_read locks only SUCCESS keys, so the found-set already
+            # equals the locked set -- nothing to release.
+            l1_found_indices: list[int] = []
+            succeeded_keys: list[ObjectKey] = []
+            sparse_l2_indices: list[int] = []
+            remaining_keys: list[ObjectKey] = []
+            for i, key in enumerate(keys):
+                ent = l1_read_result.get(key)
+                if ent is not None and ent[0] == L1Error.SUCCESS and ent[1] is not None:
+                    l1_found_indices.append(i)
+                    succeeded_keys.append(key)
+                else:
+                    sparse_l2_indices.append(i)
+                    remaining_keys.append(key)
+
+            self._event_bus.publish(
+                Event(
+                    event_type=EventType.SM_READ_PREFETCHED,
+                    metadata={
+                        "succeeded_keys": succeeded_keys,
+                        "failed_keys": remaining_keys,
+                    },
+                )
+            )
+
+            prefetch_request_id = -1
+            if remaining_keys and self._l2_adapters:
+                prefetch_request_id = self._prefetch_controller.submit_prefetch_request(
+                    remaining_keys,
+                    layout_desc,
+                    extra_count=extra_count,
+                    policy=TrimPolicy.SPARSE,
+                )
+            return PrefetchHandle(
+                prefetch_request_id=prefetch_request_id,
+                external_request_id=external_request_id,
+                l1_found_indices=tuple(l1_found_indices),
+                total_requested_keys=len(keys),
+                submit_time=time.monotonic(),
+                l2_orig_indices=tuple(sparse_l2_indices),
+            )
+
         hit_count = 0
         for key in keys:
             entry = l1_read_result.get(key, None)
