@@ -320,10 +320,6 @@ class BlendV3Module:
         # path depends on) inside the single unified RPC.
         self._lookup_module = lookup_module
 
-        # Populated by cb_register_rope; mirrors gpu_transfer.gpu_contexts.
-        self._cb_gpu_contexts: dict[int, GPUCacheContext] = {}
-        self._cb_gpu_context_meta: dict[int, tuple[str, int]] = {}
-
         self._token_range_matcher = BlendTokenRangeMatcherV3(ctx.chunk_size)
         self._event_bus = ctx.event_bus
         self._cb_rope_state: dict[int, _CBRopeState] = {}
@@ -392,19 +388,23 @@ class BlendV3Module:
         ]
 
     def report_status(self) -> dict:
+        # Meta is derived live from MP server gpu_transfe
+
+        cache_contexts = self._gpu_transfer.cache_contexts
+
+        def _meta(iid: int) -> "tuple[str, int] | None":
+            entry = cache_contexts.get(iid)
+            return (entry.model_name, entry.world_size) if entry is not None else None
+
         return {
             "registered_cb_rope_instances": list(self._cb_rope_state.keys()),
-            "cb_rope_meta": {
-                str(instance_id): self._cb_gpu_context_meta.get(instance_id)
-                for instance_id in self._cb_rope_state.keys()
-            },
+            "cb_rope_meta": {str(iid): _meta(iid) for iid in self._cb_rope_state},
+            "active_cb_lookups": len(self._cb_jobs),
         }
 
     def close(self) -> None:
         self._fingerprint_stop.set()
         self._cb_rope_state.clear()
-        self._cb_gpu_contexts.clear()
-        self._cb_gpu_context_meta.clear()
 
     # ------------------------------------------------------------------
     # V3 RPCs
@@ -439,14 +439,12 @@ class BlendV3Module:
                 f"Instance {instance_id} has no paged KV cache registered; "
                 "send REGISTER_KV_CACHE before CB_REGISTER_ROPE_V3."
             )
-        entry = cache_contexts[instance_id]
-        gpu_context = entry.cache_context
 
         cos_sin_cache = cos_sin_cache_ipc.to_tensor()
         # YaRN/longrope bake an mscale m into the rope cache (cos²+sin²=m²≠1).
         # vLLM already folds m into stored K, but CB re-RoPE assumes a pure
         # rotation, so an un-normalized m injects an m² error per K element
-        # (gpt-oss m≈1.347 → degenerate output). Strip m; m≈1 models untouched.
+
         _c32 = cos_sin_cache.to(torch.float32)
         _half = _c32.shape[1] // 2
         _m = float((_c32[:, :_half] ** 2 + _c32[:, _half:] ** 2).mean().sqrt())
@@ -470,10 +468,6 @@ class BlendV3Module:
             cos_sin_cache=cos_sin_cache,
         )
 
-        # cb_unified_lookup resolves (model, ws) → ctx via this mirror.
-        self._cb_gpu_contexts[instance_id] = gpu_context
-        self._cb_gpu_context_meta[instance_id] = (entry.model_name, entry.world_size)
-
         logger.info(
             "Registered CB rope state for instance %d "
             "(cos_sin_cache shape=%s dtype=%s, head_size=%d, is_neox=%s)",
@@ -492,8 +486,6 @@ class BlendV3Module:
                 ``UNREGISTER_KV_CACHE`` to free the KV cache itself).
         """
         self._cb_rope_state.pop(instance_id, None)
-        self._cb_gpu_contexts.pop(instance_id, None)
-        self._cb_gpu_context_meta.pop(instance_id, None)
         if instance_id not in self._gpu_transfer.cache_contexts:
             logger.warning(
                 "cb_unregister_rope: instance %d not registered", instance_id
@@ -555,22 +547,21 @@ class BlendV3Module:
     ) -> "MemoryLayoutDesc | None":
         """Find the CB KV buffer layout for ``(model_name, world_size)``.
 
+        Reads the thread-safe ``layout_desc_registry`` (populated by
+        ``gpu_transfer`` on KV-cache registration) rather than iterating
+        ``cache_contexts``: iteration races concurrent register/unregister, and
+        the registry holds the complete multi-group descriptor instead of a
+        single-group manual reconstruction.
+
         Args:
             model_name (str): Model name to match.
             world_size (int): Tensor-parallel world size to match.
 
         Returns:
             MemoryLayoutDesc | None: The matching layout, or None if no
-            registered CB GPU context matches.
+            registered CB context matches.
         """
-        for gpu_id, (m_name, w_size) in self._cb_gpu_context_meta.items():
-            if m_name == model_name and w_size == world_size:
-                cb_ctx = self._cb_gpu_contexts[gpu_id]
-                return MemoryLayoutDesc(
-                    shapes=[cb_ctx.get_kv_buffer_shape(self._ctx.chunk_size)],
-                    dtypes=[cb_ctx.dtype],
-                )
-        return None
+        return self._ctx.layout_desc_registry.find(model_name, world_size)
 
     def _sparse_prefetch_submit(
         self,
