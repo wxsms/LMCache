@@ -33,6 +33,22 @@ class TrimPolicy(enum.Enum):
     SPARSE = enum.auto()
 
 
+class PrefetchMode(enum.Enum):
+    """The intent of a prefetch request.
+
+    ``LOOKUP`` -- prefetch for an imminent reader: loaded keys are pinned for
+    the requesting workers, and whether they persist or are dropped after use
+    follows the configured prefetch policy.
+
+    ``WARM`` -- speculative pre-warm with no imminent reader: loaded keys are
+    retained and left unpinned (immediately resident and evictable), so a later
+    lookup can hit them.
+    """
+
+    LOOKUP = enum.auto()
+    WARM = enum.auto()
+
+
 @dataclass(frozen=True)
 class ObjectKey:
     """
